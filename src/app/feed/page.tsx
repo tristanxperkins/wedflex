@@ -1,28 +1,51 @@
-// Read-only vendor feed to verify open requests are visible via RLS
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
-async function getOpenRequests() {
-  // Call your own API route so no client keys are needed here
-  const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/api/open-requests`, {
-    // Ensure no caching while developing
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    return { ok: false, data: [], error: `HTTP ${res.status}` };
-  }
-  return res.json();
-}
+type Req = {
+  id: string;
+  title: string;
+  category: string;
+  location: string;
+  offer_cents: number;
+  created_at: string;
+};
 
-export default async function FeedPage() {
-  const { ok, data = [], error } = await getOpenRequests();
+export default function FeedPage() {
+  const [data, setData] = useState<Req[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch("/api/open-requests", { cache: "no-store" });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          setError(json?.error || `HTTP ${res.status}`);
+        } else {
+          setData(json.data || []);
+        }
+      } catch (e: any) {
+        setError(String(e?.message || e));
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
 
   return (
     <main className="max-w-3xl mx-auto p-6">
       <h1 className="text-2xl font-semibold mb-4">Open Requests</h1>
-      {!ok && <p className="text-red-600">Error: {String(error)}</p>}
-      {ok && data.length === 0 && <p>No open requests yet.</p>}
+
+      {loading && <p>Loading…</p>}
+      {!loading && error && <p className="text-red-600">Error: {error}</p>}
+      {!loading && !error && data.length === 0 && <p>No open requests yet.</p>}
+
       <ul className="space-y-3">
-        {data.map((r: any) => (
+        {data.map((r) => (
           <li key={r.id} className="border rounded-lg p-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-medium">{r.title}</h2>
