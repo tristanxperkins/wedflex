@@ -4,37 +4,31 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-type Req = {
-  id: string;
-  title: string;
-  category: string;
-  location: string;
-  offer_cents: number;
-  created_at: string;
-};
-
 export default function FeedPage() {
-  const [data, setData] = useState<Req[]>([]);
+  const [data, setData] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function load() {
+    let cancelled = false;
+    (async () => {
       try {
         const res = await fetch("/api/open-requests", { cache: "no-store" });
         const json = await res.json();
-        if (!res.ok || !json.ok) {
-          setError(json?.error || `HTTP ${res.status}`);
+        if (!res.ok || !json?.ok) {
+          if (!cancelled) setError(json?.error || `HTTP ${res.status}`);
         } else {
-          setData(json.data || []);
+          if (!cancelled) setData(json.data || []);
         }
       } catch (e: any) {
-        setError(String(e?.message || e));
+        if (!cancelled) setError(String(e?.message || e));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    }
-    load();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -46,7 +40,7 @@ export default function FeedPage() {
       {!loading && !error && data.length === 0 && <p>No open requests yet.</p>}
 
       <ul className="space-y-3">
-        {data.map((r) => (
+        {data.map((r: any) => (
           <li key={r.id} className="border rounded-lg p-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-medium">{r.title}</h2>
