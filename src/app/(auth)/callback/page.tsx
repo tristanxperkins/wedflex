@@ -1,25 +1,30 @@
 "use client";
-import { useEffect, useState } from "react";
-import { supabaseBrowser } from "@/app/supabase/client";
-import Link from "next/link";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { supabaseBrowser } from "../../supabase/client";
 
-export default function AuthCallbackPage() {
-  const [status, setStatus] = useState("Verifying...");
+export default function AuthCallback() {
+  const router = useRouter();
 
   useEffect(() => {
-    const supabase = supabaseBrowser();
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (error) setStatus(`Error: ${error.message}`);
-      else if (data.session) setStatus("Signed in!");
-      else setStatus("No session found.");
-    });
-  }, []);
+    const sb = supabaseBrowser();
 
-  return (
-    <main className="max-w-md mx-auto p-6">
-      <h1 className="text-xl font-semibold mb-2">Auth Callback</h1>
-      <p className="mb-4">{status}</p>
-      <Link href="/" className="text-blue-600">Go home</Link>
-    </main>
-  );
+    // Magic link (hash) or OAuth (code) are both handled by the SDK
+    // We just wait for a session and then redirect.
+    sb.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        router.replace("/feed"); // or wherever you want to land users
+      }
+    });
+
+    const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
+      if (session) router.replace("/feed");
+    });
+
+    return () => {
+      sub.subscription.unsubscribe();
+    };
+  }, [router]);
+
+  return <main className="p-6">Signing you in…</main>;
 }
