@@ -1,20 +1,32 @@
+// src/app/api/open-requests/route.ts
 import { NextResponse } from "next/server";
-import { supabaseBrowser } from "../../supabase/client";
+import { headers } from "next/headers";
+import { createClient } from "@supabase/supabase-js";
+
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export async function GET() {
-  const supabase = supabaseBrowser();
+  try {
+     const hdrs = await headers();
+    const auth = hdrs.get("authorization") ?? "";
+    const supabase = createClient(url, anon, {
+      global: { headers: { Authorization: auth } },
+    });
 
-  // Only reads open requests; matches your RLS (“requests: read open”)
-  const { data, error } = await supabase
-    .from("service_requests")
-    .select("id,title,category,location,offer_cents,created_at")
-    .eq("is_open", true)
-    .order("created_at", { ascending: false })
-    .limit(20);
+    const { data, error } = await supabase
+      .from("service_requests")
+      .select("id, title, category, location, offer_cents, status, created_at")
+      .eq("status", "open")
+      .order("created_at", { ascending: false })
+      .limit(50);
 
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true, data });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
-
-  return NextResponse.json({ ok: true, count: data.length, data });
 }

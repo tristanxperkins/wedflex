@@ -2,25 +2,31 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabaseBrowser } from "../supabase/client"; // note the relative path from /app/components
+import { supabaseBrowser } from "../supabase/client";
 
 type Props = { children: React.ReactNode };
 
 export default function RequireAuth({ children }: Props) {
   const router = useRouter();
-  const [ready, setReady] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const sb = supabaseBrowser();
+
     sb.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        router.replace("/signin");
-      } else {
-        setReady(true);
-      }
+      if (!data.session) router.replace("/signin");
+      else setIsLoading(false);
     });
+
+    const { data: listener } = sb.auth.onAuthStateChange((_e, session) => {
+      if (!session) router.replace("/signin");
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
   }, [router]);
 
-  if (!ready) return null; // could render a spinner
+  if (isLoading) return null;
   return <>{children}</>;
 }
