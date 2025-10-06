@@ -1,19 +1,40 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { supabaseBrowser } from "../../supabase/client";
 import RequireAuth from "../../components/RequireAuth";
+import { supabaseBrowser } from "../../supabase/client";
 
 type ActiveRole = "couple" | "wedflexer" | null;
+
+type RequestRow = {
+  id: string;
+  title: string;
+  category: string;
+  location: string;
+  offer_cents: number;
+  status: "open" | "awarded" | "closed" | "cancelled";
+  created_at: string;
+  couple_id: string;
+};
+
+type ApplicationRow = {
+  id: string;
+  request_id: string;
+  wedflexer_id: string;
+  message: string | null;
+  bid_cents: number | null;
+  status: "pending" | "accepted" | "rejected" | "withdrawn" | null;
+  created_at: string;
+};
 
 export default function RequestDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
 
-  const [reqRow, setReqRow] = useState<any | null>(null);
-  const [apps, setApps] = useState<any[]>([]);
+  const [reqRow, setReqRow] = useState<RequestRow | null>(null);
+  const [apps, setApps] = useState<ApplicationRow[]>([]);
   const [active, setActive] = useState<ActiveRole>(null);
   const [isOwner, setIsOwner] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -28,9 +49,11 @@ export default function RequestDetailPage() {
       try {
         const sb = supabaseBrowser();
 
-        // Who am I? + active role
+        // who am I + role
         const { data: me } = await sb.auth.getUser();
+        let uid: string | null = null;
         if (me?.user?.id) {
+          uid = me.user.id;
           const { data: p } = await sb
             .from("profiles")
             .select("active_role")
@@ -39,36 +62,52 @@ export default function RequestDetailPage() {
           setActive((p?.active_role as ActiveRole) ?? null);
         }
 
-        // token
+        // token for API
         const { data: sess } = await sb.auth.getSession();
         const token = sess.session?.access_token;
 
-        // load request (+apps if owner) via API
+        // load request (+ apps if owner) via API
         const res = await fetch(`/api/requests/${id}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         const json = await res.json();
         if (!res.ok || !json?.ok) throw new Error(json?.error || `HTTP ${res.status}`);
 
-        setReqRow(json.request);
-        setApps(json.applications || []);
-        if (me?.user?.id && json.request?.couple_id === me.user.id) setIsOwner(true);
-      } catch (e: any) {
-        if (!cancel) setErr(String(e?.message || e));
+        const request: RequestRow = json.request;
+        const applications: ApplicationRow[] = json.applications || [];
+
+        if (!cancel) {
+          setReqRow(request);
+          setApps(applications);
+          if (uid && request.couple_id === uid) setIsOwner(true);
+        }
+      } catch (e) {
+        if (!cancel) setErr(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancel) setLoading(false);
       }
     })();
-    return () => { cancel = true; };
+    return () => {
+      cancel = true;
+    };
   }, [id]);
+
+  const offerAmount = useMemo(
+    () =>
+      reqRow ? `$${Math.round(reqRow.offer_cents / 100).toLocaleString()}` : "",
+    [reqRow]
+  );
 
   async function apply() {
     try {
       setPosting(true);
-      setOkMsg(null); setErr(null);
+      setOkMsg(null);
+      setErr(null);
+
       const sb = supabaseBrowser();
       const { data: sess } = await sb.auth.getSession();
       const token = sess.session?.access_token;
+
       const res = await fetch("/api/applications", {
         method: "POST",
         headers: {
@@ -81,8 +120,8 @@ export default function RequestDetailPage() {
       if (!res.ok || !json.ok) throw new Error(json?.error || `HTTP ${res.status}`);
       setOkMsg("Applied!");
       setApplyMsg("");
-    } catch (e: any) {
-      setErr(String(e?.message || e));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setPosting(false);
     }
@@ -95,12 +134,17 @@ export default function RequestDetailPage() {
         {err && <p className="text-red-600">Error: {err}</p>}
         {!loading && reqRow && (
           <>
-            <h1 className="text-2xl font-semibold mb-1">{reqRow.title}</h1>
-            <p className="opacity-80 text-sm mb-4">
-              {reqRow.category} • {reqRow.location} • ${Math.round(reqRow.offer_cents/100).toLocaleString()}
-            </p>
+            <div className="mb-4">
+              <h1 className="text-2xl font-semibold mb-1">{reqRow.title}</h1>
+              <p className="opacity-80 text-sm">
+                {reqRow.category} • {reqRow.location} • {offerAmount}
+              </p>
+              <p className="text-xs mt-1 opacity-70">
+                Status: {reqRow.status}
+              </p>
+            </div>
 
-            {active === "wedflexer" && (
+            {active === "wedflexer" && reqRow.status === "open" && (
               <section className="border rounded-lg p-4 mb-6">
                 <h2 className="font-medium mb-2">Apply to this offer</h2>
                 <textarea
@@ -121,30 +165,184 @@ export default function RequestDetailPage() {
             )}
 
             {isOwner && (
-              <section className="border rounded-lg p-4">
-                <h2 className="font-medium mb-3">Applications</h2>
-                {apps.length === 0 && <p className="text-sm opacity-70">No applications yet.</p>}
-                <ul className="space-y-3">
-                  {apps.map((a: any) => (
-                    <li key={a.id} className="border rounded p-3">
-                      <div className="flex justify-between">
-                        <strong>{a.wedflexer_id}</strong>
-                        {a.bid_cents != null && (
-                          <span className="text-sm opacity-70">
-                            Bid ${Math.round(a.bid_cents/100).toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                      {a.message && <p className="text-sm mt-2">{a.message}</p>}
-                      <p className="text-xs opacity-60 mt-1">{new Date(a.created_at).toLocaleString()}</p>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+              <ApplicationsOwnerSection
+                requestId={reqRow.id}
+                apps={apps}
+                onAppsChange={setApps}
+                onRequestStatus={(status) =>
+                  setReqRow((prev) => (prev ? { ...prev, status } : prev))
+                }
+              />
             )}
           </>
         )}
       </main>
     </RequireAuth>
+  );
+}
+
+/** Owner-only Applications panel with Book / Accept / Reject actions */
+function ApplicationsOwnerSection({
+  requestId,
+  apps,
+  onAppsChange,
+  onRequestStatus,
+}: {
+  requestId: string;
+  apps: ApplicationRow[];
+  onAppsChange: (rows: ApplicationRow[]) => void;
+  onRequestStatus: (status: RequestRow["status"]) => void;
+}) {
+  return (
+    <section className="border rounded-lg p-4">
+      <h2 className="font-medium mb-3">Applications</h2>
+      {apps.length === 0 && (
+        <p className="text-sm opacity-70">No applications yet.</p>
+      )}
+      <ul className="space-y-3">
+        {apps.map((a) => (
+          <li key={a.id} className="border rounded p-3">
+            <div className="flex justify-between items-start gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <strong>{a.wedflexer_id}</strong>
+                  <span className="text-xs px-2 py-0.5 border rounded">
+                    {a.status ?? "pending"}
+                  </span>
+                </div>
+                {a.message && <p className="text-sm mt-2">{a.message}</p>}
+                <p className="text-xs opacity-60 mt-1">
+                  {new Date(a.created_at).toLocaleString()}
+                </p>
+                {typeof a.bid_cents === "number" && (
+                  <p className="text-sm opacity-70 mt-2">
+                    Bid ${Math.round(a.bid_cents / 100).toLocaleString()}
+                  </p>
+                )}
+              </div>
+
+              <OwnerActions
+                requestId={requestId}
+                appId={a.id}
+                current={a.status}
+                onAccepted={() => {
+                  // mark selected accepted, others rejected, request awarded
+                  onAppsChange(
+                    apps.map((row) =>
+                      row.id === a.id
+                        ? { ...row, status: "accepted" }
+                        : { ...row, status: row.status === "accepted" ? "rejected" : "rejected" }
+                    )
+                  );
+                  onRequestStatus("awarded");
+                }}
+                onRejected={() => {
+                  onAppsChange(
+                    apps.map((row) =>
+                      row.id === a.id ? { ...row, status: "rejected" } : row
+                    )
+                  );
+                }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function OwnerActions({
+  requestId,
+  appId,
+  current,
+  onAccepted,
+  onRejected,
+}: {
+  requestId: string;
+  appId: string;
+  current: ApplicationRow["status"];
+  onAccepted: () => void;
+  onRejected: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function getToken(): Promise<string | undefined> {
+    const { supabaseBrowser } = await import("../../supabase/client");
+    const sb = supabaseBrowser();
+    const { data: sess } = await sb.auth.getSession();
+    return sess.session?.access_token;
+  }
+
+  async function bookWedflexer() {
+    try {
+      setBusy(true);
+      const token = await getToken();
+      const res = await fetch(`/api/requests/${requestId}/book`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ application_id: appId }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      onAccepted();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setStatus(status: "accepted" | "rejected") {
+    try {
+      setBusy(true);
+      const token = await getToken();
+      const res = await fetch(`/api/applications/${appId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      if (status === "accepted") onAccepted();
+      else onRejected();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex gap-2">
+      <button
+        onClick={bookWedflexer}
+        disabled={busy || current === "accepted"}
+        className="bg-purple-700 text-white text-sm rounded px-3 py-1 disabled:opacity-60"
+        title="Accept this WedFlexer, reject others, and award the offer"
+      >
+        Book
+      </button>
+      <button
+        onClick={() => setStatus("accepted")}
+        disabled={busy || current === "accepted"}
+        className="bg-green-600 text-white text-sm rounded px-3 py-1 disabled:opacity-60"
+      >
+        Accept
+      </button>
+      <button
+        onClick={() => setStatus("rejected")}
+        disabled={busy || current === "rejected"}
+        className="bg-red-600 text-white text-sm rounded px-3 py-1 disabled:opacity-60"
+      >
+        Reject
+      </button>
+    </div>
   );
 }

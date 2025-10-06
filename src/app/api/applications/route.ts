@@ -1,12 +1,12 @@
 // src/app/api/applications/route.ts
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { headers } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const { request_id, message, bid_cents } = await req.json();
 
