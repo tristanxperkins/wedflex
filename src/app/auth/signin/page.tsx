@@ -1,10 +1,8 @@
 "use client";
 
 import { useState } from "react";
-// If your tsconfig sets `@/*` to "src/*", this alias works:
+// RELATIVE import = robust on Vercel
 import { supabaseBrowser } from "../../supabase/client";
-// If that alias isn't set up, use the relative path instead:
-// import { supabaseBrowser } from "../../supabase/client";
 
 export default function SignInPage() {
   const [email, setEmail] = useState("");
@@ -16,26 +14,18 @@ export default function SignInPage() {
     e.preventDefault();
     setSending(true);
     setError(null);
-
     try {
       const sb = supabaseBrowser();
 
-      // build a redirect URL that works on localhost AND vercel
+      // Works on localhost & prod automatically
       const redirectBase = `${window.location.origin}/auth/callback`;
-
-      // optional: preserve where the user was headed (e.g., /r/<id>)
-      const params = new URLSearchParams(window.location.search);
-      const returnTo = params.get("returnTo");
-      const emailRedirectTo = returnTo
-        ? `${redirectBase}?returnTo=${encodeURIComponent(returnTo)}`
-        : redirectBase;
 
       const { error } = await sb.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo },
+        options: { emailRedirectTo: redirectBase },
       });
-
       if (error) throw error;
+
       setSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -51,9 +41,6 @@ export default function SignInPage() {
       {sent ? (
         <div className="rounded border p-4 bg-green-50">
           <p>Magic link sent to <strong>{email}</strong>.</p>
-          <p className="text-sm opacity-80 mt-1">
-            Open it on the same device if you’re signing into localhost.
-          </p>
         </div>
       ) : (
         <form onSubmit={sendLink} className="space-y-4">
@@ -68,7 +55,6 @@ export default function SignInPage() {
               placeholder="you@example.com"
             />
           </div>
-
           <button
             type="submit"
             disabled={sending || !email}
@@ -76,8 +62,7 @@ export default function SignInPage() {
           >
             {sending ? "Sending…" : "Send magic link"}
           </button>
-
-          {error && <p className="text-red-600 text-sm">Error: {error}</p>}
+          {error && <p className="text-red-600 text-sm mt-2">Error: {error}</p>}
         </form>
       )}
     </main>

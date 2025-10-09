@@ -70,7 +70,7 @@ export default function Nav() {
         {email ? (
           <span className="opacity-70 text-sm">{email}</span>
         ) : (
-          <Link href="/signin" className="underline">
+          <Link href="/auth/signin" className="underline">
             Sign in
           </Link>
         )}
