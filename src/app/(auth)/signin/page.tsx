@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 // If your tsconfig sets `@/*` to "src/*", this alias works:
-import { supabaseBrowser } from "@/app/supabase/client";
+import { supabaseBrowser } from "../../supabase/client";
 // If that alias isn't set up, use the relative path instead:
 // import { supabaseBrowser } from "../../supabase/client";
 
