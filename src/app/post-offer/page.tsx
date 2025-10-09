@@ -1,32 +1,53 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
+import { useEffect, useState } from "react";
 import RequireAuth from "../components/RequireAuth";
-import { useState } from "react";
 import { supabaseBrowser } from "../supabase/client";
 
+type Role = "couple" | "wedflexer" | null;
+
 export default function PostOfferPage() {
-  const [form, setForm] = useState({
-    title: "",
-    category: "",
-    location: "",
-    offer_cents: 0,
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [role, setRole] = useState<Role>(null);
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("");
+  const [location, setLocation] = useState("");
+  const [offer, setOffer] = useState<string>(""); // dollars (we’ll convert to cents)
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const sb = supabaseBrowser();
+      const { data: me } = await sb.auth.getUser();
+      if (me?.user?.id) {
+        const { data: p } = await sb
+          .from("profiles")
+          .select("active_role")
+          .eq("id", me.user.id)
+          .single();
+        setRole((p?.active_role as Role) ?? null);
+      }
+    })();
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitting(true);
-    setErr(null);
-    setMsg(null);
-
+    setSaving(true);
+    setError(null);
+    setOk(null);
     try {
-      // Get the current access token
+      if (role !== "couple") {
+        throw new Error("Switch to Couple role to post an offer.");
+      }
       const sb = supabaseBrowser();
       const { data: sess } = await sb.auth.getSession();
       const token = sess.session?.access_token;
+
+      const offer_cents =
+        offer.trim() === ""
+          ? null
+          : Math.max(0, Math.round(parseFloat(offer) * 100));
 
       const res = await fetch("/api/requests", {
         method: "POST",
@@ -34,88 +55,102 @@ export default function PostOfferPage() {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          title,
+          category,
+          location,
+          offer_cents,
+        }),
       });
-
       const json = await res.json();
-      if (!res.ok || !json.ok) {
-        setErr(json?.error || `HTTP ${res.status}`);
-      } else {
-        setMsg("Offer posted! It will appear in Browse Offers.");
-        setForm({ title: "", category: "", location: "", offer_cents: 0 });
-      }
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      if (!res.ok || !json.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+
+      setOk("Offer posted!");
+      setTitle("");
+      setCategory("");
+      setLocation("");
+      setOffer("");
+      // optionally navigate to the new detail page:
+      // window.location.href = `/r/${json.id}`;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   }
 
   return (
     <RequireAuth>
       <main className="max-w-xl mx-auto p-6">
-        <h1 className="text-2xl font-semibold mb-4">Post a Wedding Offer</h1>
+        <h1 className="text-2xl font-semibold mb-4">Post an Offer</h1>
+
+        {role !== "couple" && (
+          <p className="text-sm mb-4 text-amber-700">
+            You’re currently <strong>{role ?? "unset"}</strong>. Switch to <strong>Couple</strong> on the Setup Role page to post.
+          </p>
+        )}
 
         <form onSubmit={submit} className="space-y-4">
           <div>
             <label className="block text-sm mb-1">Title</label>
             <input
-              className="w-full border rounded px-3 py-2"
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
               required
+              className="w-full border rounded px-3 py-2"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g., Day-of Coordinator for June 14"
             />
           </div>
 
           <div>
             <label className="block text-sm mb-1">Category</label>
             <input
-              className="w-full border rounded px-3 py-2"
-              placeholder="Photographer, DJ, Florist..."
-              value={form.category}
-              onChange={(e) => setForm({ ...form, category: e.target.value })}
               required
+              className="w-full border rounded px-3 py-2"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="Coordinator, Photographer, DJ…"
             />
           </div>
 
           <div>
             <label className="block text-sm mb-1">Location</label>
             <input
-              className="w-full border rounded px-3 py-2"
-              placeholder="City, State"
-              value={form.location}
-              onChange={(e) => setForm({ ...form, location: e.target.value })}
               required
+              className="w-full border rounded px-3 py-2"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="City, State"
             />
           </div>
 
           <div>
-            <label className="block text-sm mb-1">Offer ($)</label>
+            <label className="block text-sm mb-1">Offer (USD)</label>
             <input
               type="number"
-              min={0}
+              min="0"
+              step="1"
               className="w-full border rounded px-3 py-2"
-              value={Math.round(form.offer_cents / 100)}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  offer_cents: Math.max(0, Number(e.target.value) || 0) * 100,
-                })
-              }
-              required
+              value={offer}
+              onChange={(e) => setOffer(e.target.value)}
+              placeholder="500"
             />
+            <p className="text-xs opacity-70 mt-1">
+              Optional. Leave blank if you want WedFlexers to bid.
+            </p>
           </div>
 
           <button
-            disabled={submitting}
+            type="submit"
+            disabled={saving || role !== "couple"}
             className="bg-black text-white rounded px-4 py-2 disabled:opacity-60"
           >
-            {submitting ? "Posting…" : "Post Offer"}
+            {saving ? "Posting…" : "Post Offer"}
           </button>
-        </form>
 
-        {msg && <p className="text-green-700 mt-4">{msg}</p>}
-        {err && <p className="text-red-600 mt-2">Error: {err}</p>}
+          {ok && <p className="text-green-700">{ok}</p>}
+          {error && <p className="text-red-600">Error: {error}</p>}
+        </form>
       </main>
     </RequireAuth>
   );
