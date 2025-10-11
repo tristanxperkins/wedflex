@@ -42,6 +42,8 @@ export default function RequestDetailPage() {
   const [posting, setPosting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+    const [acceptOffer, setAcceptOffer] = useState(false);
+    const [counter, setCounter] = useState<string>("");
 
   useEffect(() => {
     let cancel = false;
@@ -108,14 +110,20 @@ export default function RequestDetailPage() {
       const { data: sess } = await sb.auth.getSession();
       const token = sess.session?.access_token;
 
-      const res = await fetch("/api/applications", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ request_id: id, message: applyMsg, bid_cents: null }),
-      });
+     const res = await fetch("/api/applications", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  },
+  body: JSON.stringify({
+    request_id: id,
+    message: applyMsg,
+    accept_offer: acceptOffer,
+    counter_offer: counter.trim() === "" ? null : Number(counter),
+  }),
+});
+
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json?.error || `HTTP ${res.status}`);
       setOkMsg("Applied!");
@@ -126,6 +134,14 @@ export default function RequestDetailPage() {
       setPosting(false);
     }
   }
+
+    function setAcceptOffer(checked: boolean) {
+        throw new Error("Function not implemented.");
+    }
+
+    function setCounter(arg0: string) {
+        throw new Error("Function not implemented.");
+    }
 
   return (
     <RequireAuth>
@@ -145,24 +161,81 @@ export default function RequestDetailPage() {
             </div>
 
             {active === "wedflexer" && reqRow.status === "open" && (
-              <section className="border rounded-lg p-4 mb-6">
-                <h2 className="font-medium mb-2">Apply to this offer</h2>
-                <textarea
-                  className="w-full border rounded p-2 text-sm"
-                  placeholder="Optional message to the couple"
-                  value={applyMsg}
-                  onChange={(e) => setApplyMsg(e.target.value)}
-                />
-                <button
-                  onClick={apply}
-                  disabled={posting}
-                  className="mt-2 bg-black text-white rounded px-4 py-2 disabled:opacity-60"
-                >
-                  {posting ? "Applying…" : "Send Application"}
-                </button>
-                {okMsg && <p className="text-green-700 mt-2">{okMsg}</p>}
-              </section>
-            )}
+  <section className="border rounded-lg p-4 mb-6">
+    <h2 className="text-xl font-semibold mb-1">Apply Now</h2>
+    <p className="text-sm opacity-80 mb-4">
+      Send a message to the couple letting them know why you're a perfect fit
+    </p>
+
+    <label className="block text-sm font-medium mb-1">Your Message to the Couple *</label>
+    <textarea
+      className="w-full border rounded p-2 text-sm"
+      placeholder="Introduce yourself and explain why you'd be a great fit for their wedding..."
+      value={applyMsg}
+      onChange={(e) => setApplyMsg(e.target.value)}
+      required
+    />
+
+    {/* Offer acceptance / counter */}
+    <div className="mt-4">
+      <label className="block text-sm font-medium">Offer Acceptance</label>
+      <div className="mt-2 border rounded p-3 flex items-center gap-2">
+        <input
+          id="accept-offer"
+          type="checkbox"
+          className="h-4 w-4"
+          checked={setAcceptOffer}
+          onChange={(e) => {
+            setAcceptOffer(e.target.checked);
+            if (e.target.checked) setCounter(""); // clear counter if accepting
+          }}
+          disabled={reqRow.offer_cents == null}
+        />
+        <label htmlFor="accept-offer" className="text-sm">
+          {reqRow.offer_cents != null
+            ? `I accept the offer of $${Math.round(reqRow.offer_cents / 100).toLocaleString()}`
+            : "Couple did not post an offer amount"}
+        </label>
+      </div>
+
+      {/* Counter-offer shows when they are NOT accepting, OR when no posted offer exists */}
+      <div className="mt-3">
+        <label className="block text-sm font-medium mb-1">Your counter-offer</label>
+        <div className="flex items-center gap-2">
+          <span className="border rounded px-2 py-2 text-sm select-none">$</span>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            className="w-full border rounded px-3 py-2"
+            placeholder={
+              reqRow.offer_cents != null
+                ? Math.round(reqRow.offer_cents / 100).toString()
+                : "Enter your bid"
+            }
+            value={counter}
+            onChange={(e) => setCounter(e.target.value)}
+            disabled={setAcceptOffer && reqRow.offer_cents != null}
+          />
+        </div>
+        <p className="text-xs opacity-70 mt-1">
+          Leave blank to send only your message.
+        </p>
+      </div>
+    </div>
+
+    <button
+      onClick={apply}
+      disabled={posting}
+      className="mt-4 bg-purple-700 text-white rounded px-4 py-2 disabled:opacity-60"
+    >
+      {posting ? "Sending…" : "Send Application & Message"}
+    </button>
+    {okMsg && <p className="text-green-700 mt-2">{okMsg}</p>}
+    {err && <p className="text-red-600 mt-2">Error: {err}</p>}
+  </section>
+)}
+
 
             {isOwner && (
               <ApplicationsOwnerSection
