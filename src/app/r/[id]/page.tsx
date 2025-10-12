@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -13,7 +12,7 @@ type RequestRow = {
   title: string;
   category: string;
   location: string;
-  offer_cents: number;
+  offer_cents: number | null;
   status: "open" | "awarded" | "closed" | "cancelled";
   created_at: string;
   couple_id: string;
@@ -38,12 +37,14 @@ export default function RequestDetailPage() {
   const [active, setActive] = useState<ActiveRole>(null);
   const [isOwner, setIsOwner] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [applyMsg, setApplyMsg] = useState("");
-  const [posting, setPosting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Apply form state
+  const [applyMsg, setApplyMsg] = useState("");
+  const [acceptOffer, setAcceptOffer] = useState(false);
+  const [counter, setCounter] = useState<string>("");
+  const [posting, setPosting] = useState(false);
   const [okMsg, setOkMsg] = useState<string | null>(null);
-    const [acceptOffer, setAcceptOffer] = useState(false);
-    const [counter, setCounter] = useState<string>("");
 
   useEffect(() => {
     let cancel = false;
@@ -64,16 +65,18 @@ export default function RequestDetailPage() {
           setActive((p?.active_role as ActiveRole) ?? null);
         }
 
-        // token for API
+        // token
         const { data: sess } = await sb.auth.getSession();
         const token = sess.session?.access_token;
 
-        // load request (+ apps if owner) via API
+        // fetch request & applications (if owner) from your API
         const res = await fetch(`/api/requests/${id}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         const json = await res.json();
-        if (!res.ok || !json?.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+        if (!res.ok || !json?.ok) {
+          throw new Error(json?.error || `HTTP ${res.status}`);
+        }
 
         const request: RequestRow = json.request;
         const applications: ApplicationRow[] = json.applications || [];
@@ -96,7 +99,9 @@ export default function RequestDetailPage() {
 
   const offerAmount = useMemo(
     () =>
-      reqRow ? `$${Math.round(reqRow.offer_cents / 100).toLocaleString()}` : "",
+      reqRow?.offer_cents != null
+        ? `$${Math.round(reqRow.offer_cents / 100).toLocaleString()}`
+        : undefined,
     [reqRow]
   );
 
@@ -110,38 +115,33 @@ export default function RequestDetailPage() {
       const { data: sess } = await sb.auth.getSession();
       const token = sess.session?.access_token;
 
-     const res = await fetch("/api/applications", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  },
-  body: JSON.stringify({
-    request_id: id,
-    message: applyMsg,
-    accept_offer: acceptOffer,
-    counter_offer: counter.trim() === "" ? null : Number(counter),
-  }),
-});
+      const res = await fetch("/api/applications", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          request_id: id,
+          message: applyMsg,
+          accept_offer: acceptOffer,
+          counter_offer: counter.trim() === "" ? null : Number(counter),
+        }),
+      });
 
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+
       setOkMsg("Applied!");
       setApplyMsg("");
+      setAcceptOffer(false);
+      setCounter("");
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setPosting(false);
     }
   }
-
-    function setAcceptOffer(checked: boolean) {
-        throw new Error("Function not implemented.");
-    }
-
-    function setCounter(arg0: string) {
-        throw new Error("Function not implemented.");
-    }
 
   return (
     <RequireAuth>
@@ -150,93 +150,100 @@ export default function RequestDetailPage() {
         {err && <p className="text-red-600">Error: {err}</p>}
         {!loading && reqRow && (
           <>
-            <div className="mb-4">
+            <header className="mb-4">
               <h1 className="text-2xl font-semibold mb-1">{reqRow.title}</h1>
               <p className="opacity-80 text-sm">
-                {reqRow.category} • {reqRow.location} • {offerAmount}
+                {reqRow.category} • {reqRow.location}{" "}
+                {offerAmount ? `• ${offerAmount}` : ""}
               </p>
-              <p className="text-xs mt-1 opacity-70">
-                Status: {reqRow.status}
-              </p>
-            </div>
+              <p className="text-xs mt-1 opacity-70">Status: {reqRow.status}</p>
+            </header>
 
+            {/* Wedflexer apply panel */}
             {active === "wedflexer" && reqRow.status === "open" && (
-  <section className="border rounded-lg p-4 mb-6">
-    <h2 className="text-xl font-semibold mb-1">Apply Now</h2>
-    <p className="text-sm opacity-80 mb-4">
-      Send a message to the couple letting them know why you're a perfect fit
-    </p>
+              <section className="border rounded-lg p-4 mb-6">
+                <h2 className="text-xl font-semibold mb-1">Apply Now</h2>
+                <p className="text-sm opacity-80 mb-4">
+                  Send a message to the couple letting them know why you are a perfect fit
+                </p>
 
-    <label className="block text-sm font-medium mb-1">Your Message to the Couple *</label>
-    <textarea
-      className="w-full border rounded p-2 text-sm"
-      placeholder="Introduce yourself and explain why you'd be a great fit for their wedding..."
-      value={applyMsg}
-      onChange={(e) => setApplyMsg(e.target.value)}
-      required
-    />
+                <label className="block text-sm font-medium mb-1">
+                  Your Message to the Couple *
+                </label>
+                <textarea
+                  className="w-full border rounded p-2 text-sm"
+                  placeholder="Introduce yourself and explain why you are a great fit for their wedding..."
+                  value={applyMsg}
+                  onChange={(e) => setApplyMsg(e.target.value)}
+                  required
+                />
 
-    {/* Offer acceptance / counter */}
-    <div className="mt-4">
-      <label className="block text-sm font-medium">Offer Acceptance</label>
-      <div className="mt-2 border rounded p-3 flex items-center gap-2">
-        <input
-          id="accept-offer"
-          type="checkbox"
-          className="h-4 w-4"
-          checked={setAcceptOffer}
-          onChange={(e) => {
-            setAcceptOffer(e.target.checked);
-            if (e.target.checked) setCounter(""); // clear counter if accepting
-          }}
-          disabled={reqRow.offer_cents == null}
-        />
-        <label htmlFor="accept-offer" className="text-sm">
-          {reqRow.offer_cents != null
-            ? `I accept the offer of $${Math.round(reqRow.offer_cents / 100).toLocaleString()}`
-            : "Couple did not post an offer amount"}
-        </label>
-      </div>
+                {/* Offer acceptance / counter-offer */}
+                <div className="mt-4">
+                  <label className="block text-sm font-medium">Offer Acceptance</label>
+                  <div className="mt-2 border rounded p-3 flex items-center gap-2">
+                    <input
+                      id="accept-offer"
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={acceptOffer}
+                      onChange={(e) => {
+                        setAcceptOffer(e.target.checked);
+                        if (e.target.checked) setCounter(""); // clear counter when accepting
+                      }}
+                      disabled={reqRow.offer_cents == null}
+                    />
+                    <label htmlFor="accept-offer" className="text-sm">
+                      {reqRow.offer_cents != null
+                        ? `I accept the offer of $${Math.round(
+                            reqRow.offer_cents / 100
+                          ).toLocaleString()}`
+                        : "Couple did not post an offer amount"}
+                    </label>
+                  </div>
 
-      {/* Counter-offer shows when they are NOT accepting, OR when no posted offer exists */}
-      <div className="mt-3">
-        <label className="block text-sm font-medium mb-1">Your counter-offer</label>
-        <div className="flex items-center gap-2">
-          <span className="border rounded px-2 py-2 text-sm select-none">$</span>
-          <input
-            type="number"
-            min={0}
-            step={1}
-            className="w-full border rounded px-3 py-2"
-            placeholder={
-              reqRow.offer_cents != null
-                ? Math.round(reqRow.offer_cents / 100).toString()
-                : "Enter your bid"
-            }
-            value={counter}
-            onChange={(e) => setCounter(e.target.value)}
-            disabled={setAcceptOffer && reqRow.offer_cents != null}
-          />
-        </div>
-        <p className="text-xs opacity-70 mt-1">
-          Leave blank to send only your message.
-        </p>
-      </div>
-    </div>
+                  <div className="mt-3">
+                    <label className="block text-sm font-medium mb-1">
+                      Your counter-offer
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <span className="border rounded px-2 py-2 text-sm select-none">
+                        $
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        className="w-full border rounded px-3 py-2"
+                        placeholder={
+                          reqRow.offer_cents != null
+                            ? Math.round(reqRow.offer_cents / 100).toString()
+                            : "Enter your bid"
+                        }
+                        value={counter}
+                        onChange={(e) => setCounter(e.target.value)}
+                        disabled={acceptOffer && reqRow.offer_cents != null}
+                      />
+                    </div>
+                    <p className="text-xs opacity-70 mt-1">
+                      Leave blank to send only your message.
+                    </p>
+                  </div>
+                </div>
 
-    <button
-      onClick={apply}
-      disabled={posting}
-      className="mt-4 bg-purple-700 text-white rounded px-4 py-2 disabled:opacity-60"
-    >
-      {posting ? "Sending…" : "Send Application & Message"}
-    </button>
-    {okMsg && <p className="text-green-700 mt-2">{okMsg}</p>}
-    {err && <p className="text-red-600 mt-2">Error: {err}</p>}
-  </section>
-)}
+                <button
+                  onClick={apply}
+                  disabled={posting}
+                  className="mt-4 bg-purple-700 text-white rounded px-4 py-2 disabled:opacity-60"
+                >
+                  {posting ? "Sending…" : "Send Application & Message"}
+                </button>
+                {okMsg && <p className="text-green-700 mt-2">{okMsg}</p>}
+                {!okMsg && err && <p className="text-red-600 mt-2">Error: {err}</p>}
+              </section>
+            )}
 
-
+            {/* Owner panel */}
             {isOwner && (
               <ApplicationsOwnerSection
                 requestId={reqRow.id}
@@ -299,12 +306,11 @@ function ApplicationsOwnerSection({
                 appId={a.id}
                 current={a.status}
                 onAccepted={() => {
-                  // mark selected accepted, others rejected, request awarded
                   onAppsChange(
                     apps.map((row) =>
                       row.id === a.id
                         ? { ...row, status: "accepted" }
-                        : { ...row, status: row.status === "accepted" ? "rejected" : "rejected" }
+                        : { ...row, status: "rejected" }
                     )
                   );
                   onRequestStatus("awarded");
@@ -398,7 +404,7 @@ function OwnerActions({
         onClick={bookWedflexer}
         disabled={busy || current === "accepted"}
         className="bg-purple-700 text-white text-sm rounded px-3 py-1 disabled:opacity-60"
-        title="Accept this WedFlexer, reject others, and award the offer"
+        title="Accept this WedFlexer, reject others, and book"
       >
         Book
       </button>
