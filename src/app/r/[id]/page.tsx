@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import RequireAuth from "../../components/RequireAuth";
 import { supabaseBrowser } from "../../supabase/client";
+import { useRouter } from "next/navigation";
 
 function toErrorString(x: unknown): string {
   if (!x) return "Unknown error";
@@ -157,6 +158,12 @@ async function apply() {
     setApplyMsg("");
     setAcceptOffer(false);
     setCounter("");
+    const router = useRouter();
+// Redirect to Browse Offers after a short pause
+setTimeout(() => {
+  router.push("/feed"); // or "/browse-offers" if you named it differently
+}, 1200);    
+
   } catch (e) {
     console.error("Apply failed:", e);
     setErr(toErrorString(e));
