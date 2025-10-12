@@ -91,10 +91,12 @@ export async function POST(req: NextRequest) {
     if (error) throw error;
 
     return NextResponse.json({ ok: true, id: app.id });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
-  }
+} catch (e: unknown) {
+  const msg =
+    e instanceof Error ? e.message : (() => { try { return JSON.stringify(e); } catch { return String(e); } })();
+  return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+}
+
 }
 
 export async function GET(_req: NextRequest) {
