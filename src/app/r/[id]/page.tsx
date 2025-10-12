@@ -5,6 +5,17 @@ import { useParams } from "next/navigation";
 import RequireAuth from "../../components/RequireAuth";
 import { supabaseBrowser } from "../../supabase/client";
 
+function toErrorString(x: unknown): string {
+  if (!x) return "Unknown error";
+  if (typeof x === "string") return x;
+  if (x instanceof Error) return x.message;
+  try {
+    return JSON.stringify(x);
+  } catch {
+    return String(x);
+  }
+}
+
 type ActiveRole = "couple" | "wedflexer" | null;
 
 type RequestRow = {
@@ -87,7 +98,7 @@ export default function RequestDetailPage() {
           if (uid && request.couple_id === uid) setIsOwner(true);
         }
       } catch (e) {
-        if (!cancel) setErr(e instanceof Error ? e.message : String(e));
+        if (!cancel) setErr(toErrorString(e));
       } finally {
         if (!cancel) setLoading(false);
       }
@@ -105,7 +116,7 @@ export default function RequestDetailPage() {
     [reqRow]
   );
 
- async function apply() {
+async function apply() {
   try {
     setPosting(true);
     setOkMsg(null);
@@ -129,8 +140,7 @@ export default function RequestDetailPage() {
       }),
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let json: any = null;
+    let json: { ok?: boolean; error?: unknown } | null = null;
     let raw = "";
     try {
       json = await res.json();
@@ -140,13 +150,7 @@ export default function RequestDetailPage() {
 
     if (!res.ok || !json?.ok) {
       const apiErr = json?.error ?? (raw || `HTTP ${res.status}`);
-      const msg =
-        typeof apiErr === "string"
-          ? apiErr
-          : apiErr?.message
-          ? apiErr.message
-          : JSON.stringify(apiErr);
-      throw new Error(msg);
+      throw new Error(toErrorString(apiErr));
     }
 
     setOkMsg("Applied!");
@@ -155,7 +159,7 @@ export default function RequestDetailPage() {
     setCounter("");
   } catch (e) {
     console.error("Apply failed:", e);
-    setErr(e instanceof Error ? e.message : String(e));
+    setErr(toErrorString(e));
   } finally {
     setPosting(false);
   }
