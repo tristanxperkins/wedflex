@@ -105,43 +105,61 @@ export default function RequestDetailPage() {
     [reqRow]
   );
 
-  async function apply() {
+ async function apply() {
+  try {
+    setPosting(true);
+    setOkMsg(null);
+    setErr(null);
+
+    const sb = supabaseBrowser();
+    const { data: sess } = await sb.auth.getSession();
+    const token = sess.session?.access_token;
+
+    const res = await fetch("/api/applications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        request_id: id,
+        message: applyMsg,
+        accept_offer: acceptOffer,
+        counter_offer: counter.trim() === "" ? null : Number(counter),
+      }),
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let json: any = null;
+    let raw = "";
     try {
-      setPosting(true);
-      setOkMsg(null);
-      setErr(null);
-
-      const sb = supabaseBrowser();
-      const { data: sess } = await sb.auth.getSession();
-      const token = sess.session?.access_token;
-
-      const res = await fetch("/api/applications", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          request_id: id,
-          message: applyMsg,
-          accept_offer: acceptOffer,
-          counter_offer: counter.trim() === "" ? null : Number(counter),
-        }),
-      });
-
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json?.error || `HTTP ${res.status}`);
-
-      setOkMsg("Applied!");
-      setApplyMsg("");
-      setAcceptOffer(false);
-      setCounter("");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPosting(false);
+      json = await res.json();
+    } catch {
+      raw = await res.text();
     }
+
+    if (!res.ok || !json?.ok) {
+      const apiErr = json?.error ?? (raw || `HTTP ${res.status}`);
+      const msg =
+        typeof apiErr === "string"
+          ? apiErr
+          : apiErr?.message
+          ? apiErr.message
+          : JSON.stringify(apiErr);
+      throw new Error(msg);
+    }
+
+    setOkMsg("Applied!");
+    setApplyMsg("");
+    setAcceptOffer(false);
+    setCounter("");
+  } catch (e) {
+    console.error("Apply failed:", e);
+    setErr(e instanceof Error ? e.message : String(e));
+  } finally {
+    setPosting(false);
   }
+}
 
   return (
     <RequireAuth>
