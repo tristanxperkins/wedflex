@@ -60,6 +60,7 @@ export default function Nav() {
         <Link href="/setup-role" className="underline">
           Roles
         </Link>
+<Link href="/dashboard" className="...">Dashboard</Link>
 
         {active && (
           <span className="text-xs rounded bg-gray-200 px-2 py-1 capitalize">
