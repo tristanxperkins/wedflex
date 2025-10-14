@@ -47,6 +47,13 @@ type Profile = {
   active_role: "couple" | "wedflexer" | null;
 };
 
+function toErrorString(x: unknown): string {
+  if (!x) return "Unknown error";
+  if (typeof x === "string") return x;
+  if (x instanceof Error) return x.message;
+  try { return JSON.stringify(x); } catch { return String(x); }
+}
+
 export default function WedflexerDashboard() {
   const [p, setP] = useState<Profile | null>(null);
   const [apps, setApps] = useState<AppRow[]>([]);
@@ -111,7 +118,7 @@ export default function WedflexerDashboard() {
         setPays((myPays ?? []) as PayRow[]);
         setActiveOffers(count ?? 0);
       } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        setErr(toErrorString(e));
       } finally {
         setLoading(false);
       }
@@ -154,7 +161,8 @@ export default function WedflexerDashboard() {
           </header>
 
           {loading && <p>Loading…</p>}
-          {err && <p className="text-red-600">Error: {err}</p>}
+          {err && <p className="text-red-600">Error: {toErrorString(err)}</p>}
+
 
           {!loading && !err && (
             <>

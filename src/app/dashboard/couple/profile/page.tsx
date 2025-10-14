@@ -15,7 +15,12 @@ type Profile = {
   wedding_story: string | null;
   wedding_style: string | null;
 };
-
+function toErrorString(x: unknown): string {
+  if (!x) return "Unknown error";
+  if (typeof x === "string") return x;
+  if (x instanceof Error) return x.message;
+  try { return JSON.stringify(x); } catch { return String(x); }
+}
 export default function CoupleProfilePage() {
   const [p, setP] = useState<Profile | null>(null);
   const [inspo, setInspo] = useState<string[]>([]);
@@ -47,7 +52,7 @@ export default function CoupleProfilePage() {
           setInspo(urls);
         }
       } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        setErr(toErrorString(e));
       }
     })();
   }, []);
@@ -69,7 +74,7 @@ export default function CoupleProfilePage() {
       if (error) throw error;
       setMsg("Saved!");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(toErrorString(e));
     } finally {
       setSaving(false);
     }
@@ -81,7 +86,7 @@ export default function CoupleProfilePage() {
         <DashboardSidebar role="couple" />
         <section className="space-y-6">
           <h1 className="text-2xl font-semibold">Couple Profile</h1>
-          {err && <p className="text-red-600">{err}</p>}
+          {err && <p className="text-red-600">Error: {toErrorString(err)}</p>}
           {!p ? <p>Loading…</p> : (
             <>
               <div className="flex items-center gap-4">
