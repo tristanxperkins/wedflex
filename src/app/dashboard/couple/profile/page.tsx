@@ -5,6 +5,7 @@ import RequireAuth from "../../../components/RequireAuth";
 import { supabaseBrowser } from "../../../supabase/client";
 import UploadInput from "../../../components/UploadInput";
 import DashboardSidebar from "../../../components/DashboardSidebar";
+import Image from "next/image";
 
 type Profile = {
   id: string;
@@ -21,6 +22,7 @@ export default function CoupleProfilePage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [portfolio, setPortfolio] = useState<string[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -83,17 +85,22 @@ export default function CoupleProfilePage() {
           {!p ? <p>Loading…</p> : (
             <>
               <div className="flex items-center gap-4">
-                <img
-                  src={p.avatar_url || "/avatar-placeholder.png"}
-                  alt="avatar"
-                  className="h-16 w-16 rounded-full object-cover border"
-                />
-                <UploadInput
-                  bucket="avatars"
-                  label="Upload avatar"
-                  onUploaded={(url) => setP({ ...p, avatar_url: url })}
-                />
-              </div>
+  <div className="h-16 w-16 relative rounded-full overflow-hidden border">
+    <Image
+      src={p.avatar_url || "/avatar-placeholder.png"}
+      alt="Profile avatar"
+      fill
+      sizes="64px"
+      className="object-cover"
+      priority
+    />
+  </div>
+  <UploadInput
+    bucket="avatars"
+    label="Upload avatar"
+    onUploaded={(url) => setP({ ...p, avatar_url: url })}
+  />
+</div>
 
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block">
@@ -151,10 +158,12 @@ export default function CoupleProfilePage() {
                   <p className="text-sm opacity-70">No images yet.</p>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {inspo.map((src) => (
-                      <img key={src} src={src} className="rounded border object-cover aspect-square" />
-                    ))}
-                  </div>
+  {portfolio.map((src) => (
+    <div key={src} className="relative aspect-square rounded border overflow-hidden">
+      <Image src={src} alt="" fill sizes="(max-width: 768px) 50vw, 25vw" className="object-cover" />
+    </div>
+  ))}
+</div>
                 )}
               </div>
 
