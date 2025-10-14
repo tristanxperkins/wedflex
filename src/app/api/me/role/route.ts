@@ -1,0 +1,34 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { headers } from "next/headers";
+import { createClient } from "@supabase/supabase-js";
+
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const { active_role } = (await req.json()) as { active_role?: "couple" | "wedflexer" };
+    if (active_role !== "couple" && active_role !== "wedflexer") {
+      return NextResponse.json({ ok: false, error: "Invalid role" }, { status: 400 });
+    }
+
+    const hdrs = await headers();
+    const auth = hdrs.get("authorization") ?? "";
+    const sb = createClient(url, anon, { global: { headers: { Authorization: auth } } });
+
+    const { data: me } = await sb.auth.getUser();
+    if (!me?.user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+
+    // RLS must allow a user to update their own profile row.
+    const { error } = await sb
+      .from("profiles")
+      .update({ active_role })
+      .eq("id", me.user.id);
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+  }
+}
