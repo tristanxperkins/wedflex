@@ -10,7 +10,7 @@ function errStr(e: unknown) {
   try { return JSON.stringify(e); } catch { return String(e); }
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(req: NextRequest){
   try {
     const hdrs = await headers();
     const auth = hdrs.get("authorization") ?? "";

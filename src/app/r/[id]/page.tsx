@@ -197,7 +197,7 @@ export default function RequestDetailPage() {
                 </label>
                 <textarea
                   className="w-full border rounded p-2 text-sm"
-                  placeholder="Tell the couple why you are a perfect fit. Talk about your talent or ability to pull it off!"
+                  placeholder="Tell the couple why you are a perfect fit. Talk about your talent or ability to pull it"
                   value={applyMsg}
                   onChange={(e) => setApplyMsg(e.target.value)}
                   required
