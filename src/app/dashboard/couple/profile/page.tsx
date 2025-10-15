@@ -10,7 +10,7 @@ import Image from "next/image";
 type Profile = {
   id: string;
   avatar_url: string | null;
-  couple_display_names: string | null;
+  couple_display_name: string | null;
   wedding_date: string | null; // ISO date
   wedding_story: string | null;
   wedding_style: string | null;
@@ -39,7 +39,7 @@ export default function CoupleProfilePage() {
 
         const { data, error } = await sb
           .from("profiles")
-          .select("id,avatar_url,couple_display_names,wedding_date,wedding_story,wedding_style")
+          .select("id,avatar_url,couple_display_name,wedding_date,wedding_story,wedding_style")
           .eq("id", uid)
           .single();
         if (error) throw error;
@@ -66,7 +66,7 @@ export default function CoupleProfilePage() {
       const sb = supabaseBrowser();
       const { error } = await sb.from("profiles").update({
         avatar_url: p.avatar_url,
-        couple_display_names: p.couple_display_names,
+        couple_display_name: p.couple_display_name,
         wedding_date: p.wedding_date,
         wedding_story: p.wedding_story,
         wedding_style: p.wedding_style,
@@ -109,11 +109,11 @@ export default function CoupleProfilePage() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block">
-                  <div className="text-sm mb-1">Couple Names (display)</div>
+                  <div className="text-sm mb-1">Your Names (display)</div>
                   <input
                     className="w-full border rounded px-3 py-2"
-                    value={p.couple_display_names ?? ""}
-                    onChange={(e) => setP({ ...p, couple_display_names: e.target.value })}
+                    value={p.couple_display_name ?? ""}
+                    onChange={(e) => setP({ ...p, couple_display_name: e.target.value })}
                     placeholder="e.g., Taylor & Jordan"
                   />
                 </label>
