@@ -29,8 +29,8 @@ type RawAppRow = {
   bid_cents: number | null;
   created_at: string;
   service_requests?:
-    | { id: string; title: string; status: ServiceReq["status"] }
-    | Array<{ id: string; title: string; status: ServiceReq["status"] }>
+    | { id: string; title: string; status: "open" | "awarded" | "closed" | "cancelled" }
+    | Array<{ id: string; title: string; status: "open" | "awarded" | "closed" | "cancelled" }>
     | null;
 };
 
@@ -79,25 +79,26 @@ export default function WedflexerDashboard() {
         if (prof) setP(prof as Profile);
 
         // Applications with joined request
-        const { data: myApps, error: aErr } = await sb
-          .from("applications")
-          .select(
-            "id, request_id, status, bid_cents, created_at, service_requests(id,title,status)"
-          )
-          .eq("wedflexer_id", uid)
-          .order("created_at", { ascending: false });
-        if (aErr) throw aErr;
+const { data: myApps, error: aErr } = await sb
+  .from("applications")
+  .select(
+    "id, request_id, status, bid_cents, created_at, service_requests:service_requests!applications_request_id_fkey(id,title,status)"
+  )
+  .eq("wedflexer_id", uid)
+  .order("created_at", { ascending: false });
+
+if (aErr) throw aErr;
 
         const normalizedApps: AppRow[] = (myApps ?? []).map((a: RawAppRow) => ({
-          id: a.id,
-          request_id: a.request_id,
-          status: (a.status ?? "pending") as AppRow["status"],
-          bid_cents: a.bid_cents,
-          created_at: a.created_at,
-          service_requests: Array.isArray(a.service_requests)
-            ? (a.service_requests[0] ?? null)
-            : (a.service_requests ?? null),
-        }));
+  id: a.id,
+  request_id: a.request_id,
+  status: (a.status ?? "pending") as AppRow["status"],
+  bid_cents: a.bid_cents,
+  created_at: a.created_at,
+  service_requests: Array.isArray(a.service_requests)
+    ? (a.service_requests[0] ?? null)
+    : (a.service_requests ?? null),
+}));
 
         // Payments list
         const { data: myPays, error: pErr } = await sb
