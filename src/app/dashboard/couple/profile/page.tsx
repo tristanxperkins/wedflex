@@ -7,12 +7,12 @@ import UploadInput from "../../../components/UploadInput";
 import DashboardSidebar from "../../../components/DashboardSidebar";
 import Image from "next/image";
 
-type Profile = {
+type CoupleProfile = {
   id: string;
   avatar_url: string | null;
   couple_display_name: string | null;
-  wedding_date: string | null; // ISO date
-  wedding_story: string | null;
+  wedding_date: string | null;
+  our_story: string | null;
   wedding_style: string | null;
 };
 function toErrorString(x: unknown): string {
@@ -22,7 +22,7 @@ function toErrorString(x: unknown): string {
   try { return JSON.stringify(x); } catch { return String(x); }
 }
 export default function CoupleProfilePage() {
-  const [p, setP] = useState<Profile | null>(null);
+  const [p, setP] = useState<CoupleProfile | null>(null);
   const [inspo, setInspo] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -35,15 +35,15 @@ export default function CoupleProfilePage() {
         const sb = supabaseBrowser();
         const { data: me } = await sb.auth.getUser();
         if (!me?.user) throw new Error("Not authenticated");
-        const uid = me.user.id;
+        const uid: string = me.user.id;
 
         const { data, error } = await sb
           .from("profiles")
-          .select("id,avatar_url,couple_display_name,wedding_date,wedding_story,wedding_style")
+          .select("id, avatar_url, couple_display_name, wedding_date, our_story, wedding_style")
           .eq("id", uid)
           .single();
         if (error) throw error;
-        setP(data as Profile);
+        setP(data as CoupleProfile);
 
         // Optional: list existing inspo (we store only URLs in UI; files live in bucket)
         const { data: list, error: lErr } = await sb.storage.from("wedding_inspo").list(`${uid}`, { sortBy: { column: "created_at", order: "desc" }});
@@ -65,12 +65,12 @@ export default function CoupleProfilePage() {
       setErr(null);
       const sb = supabaseBrowser();
       const { error } = await sb.from("profiles").update({
-        avatar_url: p.avatar_url,
-        couple_display_name: p.couple_display_name,
-        wedding_date: p.wedding_date,
-        wedding_story: p.wedding_story,
-        wedding_style: p.wedding_style,
-      }).eq("id", p.id);
+  couple_display_name: (p.couple_display_name ?? "").trim() || null,
+  wedding_date: p.wedding_date || null,
+  our_story: (p.our_story ?? "").trim() || null,   // ✅
+  wedding_style: (p.wedding_style ?? "").trim() || null,
+  avatar_url: p.avatar_url ?? null,
+});
       if (error) throw error;
       setMsg("Saved!");
     } catch (e) {
@@ -133,8 +133,8 @@ export default function CoupleProfilePage() {
                 <div className="text-sm mb-1">Our Story</div>
                 <textarea
                   className="w-full border rounded px-3 py-2 min-h-24"
-                  value={p.wedding_story ?? ""}
-                  onChange={(e) => setP({ ...p, wedding_story: e.target.value })}
+                  value={p.our_story ?? ""}
+                  onChange={(e) => setP({ ...p, our_story: e.target.value })}
                   placeholder="How you met, your journey, etc."
                 />
               </label>
