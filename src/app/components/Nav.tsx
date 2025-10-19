@@ -2,80 +2,157 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { supabaseBrowser } from "../supabase/client"; // relative to /app/components
+import { usePathname, useRouter } from "next/navigation";
+import { supabaseBrowser } from "../supabase/client";
 
-type ActiveRole = "couple" | "wedflexer" | null;
+type Me = {
+  email: string | null;
+  active_role: "couple" | "wedflexer" | null;
+};
+
+function toErrorString(x: unknown): string {
+  if (!x) return "Unknown error";
+  if (typeof x === "string") return x;
+  if (x instanceof Error) return x.message;
+  try { return JSON.stringify(x); } catch { return String(x); }
+}
 
 export default function Nav() {
-  const [email, setEmail] = useState<string | null>(null);
-  const [active, setActive] = useState<ActiveRole>(null);
+  const [me, setMe] = useState<Me | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const pathname = usePathname();
+  const router = useRouter();
 
   useEffect(() => {
-    const sb = supabaseBrowser();
+    (async () => {
+      try {
+        const sb = supabaseBrowser();
 
-    const loadActive = async (uid: string) => {
-      const { data } = await sb
-        .from("profiles")
-        .select("active_role")
-        .eq("id", uid) // RLS-safe
-        .single();
-      setActive((data?.active_role as ActiveRole) ?? null);
-    };
+        const [{ data: sess }, { data: u }] = await Promise.all([
+          sb.auth.getSession(),
+          sb.auth.getUser(),
+        ]);
 
-    // Initial user load
-    sb.auth.getUser().then(({ data }) => {
-      const u = data.user ?? null;
-      setEmail(u?.email ?? null);
-      if (u?.id) void loadActive(u.id);
-    });
+        if (!u?.user) {
+          setMe(null);
+          setLoading(false);
+          return;
+        }
 
-    // Subscribe to auth state changes
-    const {
-      data: { subscription },
-    } = sb.auth.onAuthStateChange((_event, session) => {
-      const u = session?.user ?? null;
-      setEmail(u?.email ?? null);
-      if (u?.id) void loadActive(u.id);
-      else setActive(null);
-    });
+        // fetch active_role + email
+        const { data: prof, error } = await sb
+          .from("profiles")
+          .select("active_role")
+          .eq("id", u.user.id)
+          .single();
+        if (error) throw error;
 
-    return () => {
-      subscription.unsubscribe();
-    };
+        setMe({
+          email: u.user.email ?? null,
+          active_role: (prof?.active_role as Me["active_role"]) ?? null,
+        });
+      } catch (e) {
+        setErr(toErrorString(e));
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
+  async function setRole(role: "couple" | "wedflexer") {
+    try {
+      setErr(null);
+      const sb = supabaseBrowser();
+      const { data: u } = await sb.auth.getUser();
+      if (!u?.user) {
+        router.push("/auth/signin");
+        return;
+      }
+      // call your me endpoint (PATCH) to update active_role
+      const res = await fetch("/api/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active_role: role }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      setMe((m) => (m ? { ...m, active_role: role } : m));
+      // optional: route to dashboard for the chosen role
+      router.push(role === "couple" ? "/dashboard/couple" : "/dashboard/wedflexer");
+    } catch (e) {
+      setErr(toErrorString(e));
+    }
+  }
+
+  const linkCls = (href: string) =>
+    `px-3 py-2 text-sm rounded hover:bg-gray-100 ${pathname === href ? "font-semibold" : ""}`;
+
   return (
-    <nav className="border-b px-4 py-3 flex items-center justify-between">
-      <Link href="/" className="text-lg font-semibold">
+    <div className="flex items-center justify-between gap-4">
+      {/* Left: Logo */}
+      <Link href="/" className="text-2xl font-extrabold text-purple-700">
         WedFlex
       </Link>
 
-      <div className="flex items-center gap-3">
-        <Link href="/post-offer" className="underline">
-          Post Offer
+      {/* Middle: Primary links */}
+      <nav className="hidden md:flex items-center gap-1">
+        <Link href="/feed" className={linkCls("/feed")}>Browse Offers</Link>
+        <Link href="/post-offer" className={linkCls("/post-offer")}>Post Offer</Link>
+        <Link href="/roles" className={linkCls("/roles")}>Roles</Link>
+        <Link
+          href={
+            me?.active_role === "wedflexer"
+              ? "/dashboard/wedflexer"
+              : "/dashboard/couple"
+          }
+          className={linkCls(
+            me?.active_role === "wedflexer" ? "/dashboard/wedflexer" : "/dashboard/couple"
+          )}
+        >
+          Dashboard
         </Link>
-        <Link href="/feed" className="underline">
-          Browse Offers
-        </Link>
-        <Link href="/setup-role" className="underline">
-          Roles
-        </Link>
-<Link href="/dashboard" className="...">Dashboard</Link>
+      </nav>
 
-        {active && (
-          <span className="text-xs rounded bg-gray-200 px-2 py-1 capitalize">
-            {active}
-          </span>
+      {/* Right: role toggle + auth */}
+      <div className="flex items-center gap-3">
+        {/* Role toggle (hidden when logged out) */}
+        {!!me && (
+          <div className="flex rounded-full border bg-white p-1">
+            <button
+              onClick={() => setRole("couple")}
+              className={`px-3 py-1 text-sm rounded-full ${
+                me.active_role === "couple" ? "bg-purple-700 text-white" : "text-gray-700"
+              }`}
+              aria-pressed={me.active_role === "couple"}
+            >
+              Couple
+            </button>
+            <button
+              onClick={() => setRole("wedflexer")}
+              className={`px-3 py-1 text-sm rounded-full ${
+                me.active_role === "wedflexer" ? "bg-purple-700 text-white" : "text-gray-700"
+              }`}
+              aria-pressed={me.active_role === "wedflexer"}
+            >
+              WedFlexer
+            </button>
+          </div>
         )}
 
-        {email ? (
-          <span className="opacity-70 text-sm">{email}</span>
+        {/* Auth area */}
+        {loading ? (
+          <span className="text-sm text-gray-500">…</span>
+        ) : me ? (
+          <span className="text-sm text-gray-700">{me.email}</span>
         ) : (
-          <Link href="/auth/signin" className="underline">
-            Sign in
+          <Link href="/auth/signin" className="px-3 py-2 text-sm rounded hover:bg-gray-100">
+            Sign In
           </Link>
         )}
       </div>
-    </nav>
+
+      {err && <span className="text-xs text-red-600 ml-2">Nav error: {err}</span>}
+    </div>
   );
 }
