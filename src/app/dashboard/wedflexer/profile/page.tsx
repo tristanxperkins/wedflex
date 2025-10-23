@@ -35,7 +35,20 @@ export default function WedflexerProfilePage() {
           .eq("id", uid)
           .single();
         if (error) throw error;
-        setP(data as Profile);
+        setP({
+  ...data,
+  services: Array.isArray(data.services)
+    ? data.services
+    : typeof data.services === "string"
+    ? data.services.split(",")
+    : [],
+  skills: Array.isArray(data.skills)
+    ? data.skills
+    : typeof data.skills === "string"
+    ? data.skills.split(",")
+    : [],
+  intro: typeof data.intro === "string" ? data.intro : "",
+});
 
         const { data: list, error: lErr } = await sb.storage.from("portfolio").list(`${uid}`, { sortBy: { column: "created_at", order: "desc" }});
         if (!lErr && list) {
@@ -106,7 +119,7 @@ export default function WedflexerProfilePage() {
                   className="w-full border rounded px-3 py-2 min-h-24"
                   value={p.intro ?? ""}
                   onChange={(e) => setP({ ...p, intro: e.target.value })}
-                  placeholder="Tell couples about your experience, style, and why you’re great."
+                  placeholder="Tell couples about yourself and how you can help them. Tip: showcase your talents, what you are known for among friends, i.e. making the best cakes, having the best playlist, being very organized, etc."
                 />
               </label>
 
