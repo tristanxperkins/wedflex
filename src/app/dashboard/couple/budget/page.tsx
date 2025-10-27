@@ -5,87 +5,54 @@ import RequireAuth from "../../../components/RequireAuth";
 import DashboardSidebar from "../../../components/DashboardSidebar";
 import { supabaseBrowser } from "../../../supabase/client";
 
-type BudgetItem = {
+type BudgetLine = {
   id: string;
-  couple_id: string;
-  name: string;
-  category: string | null;
+  label: string;
   planned_cents: number;
   actual_cents: number;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type PaymentRow = {
-  amount_cents: number;
-  status: "escrowed" | "released" | "refunded";
-};
-
-const toDollars = (cents: number | null | undefined) =>
-  ((cents ?? 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-const dollarsToCents = (v: string) => {
-  const n = Number(v.replace(/[^0-9.]/g, ""));
-  if (!Number.isFinite(n)) return 0;
-  return Math.round(n * 100);
 };
 
 export default function CoupleBudgetPage() {
-  const [items, setItems] = useState<BudgetItem[]>([]);
-  const [wedflexBookedCents, setWedflexBookedCents] = useState(0); // sum of payments (no status labeling)
+  const [lines, setLines] = useState<BudgetLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  // New row draft
-  const [draft, setDraft] = useState({
-    name: "",
-    category: "",
-    planned: "",
-    actual: "",
-    notes: "",
-  });
+  // local "new row" inputs
+  const [newLabel, setNewLabel] = useState("");
+  const [newPlanned, setNewPlanned] = useState<string>("");
+  const [newActual, setNewActual] = useState<string>("");
 
-  // Editing state
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editRow, setEditRow] = useState<{ name: string; category: string; planned: string; actual: string; notes: string }>({
-    name: "",
-    category: "",
-    planned: "",
-    actual: "",
-    notes: "",
-  });
-
+  // Load budget rows for the logged-in couple
   useEffect(() => {
     (async () => {
       try {
         const sb = supabaseBrowser();
         const { data: me } = await sb.auth.getUser();
-        if (!me?.user) throw new Error("Not authenticated");
+        if (!me?.user) {
+          throw new Error("Not authenticated");
+        }
+
         const uid = me.user.id;
 
-        // Load budget items (owner-only via RLS)
-        const { data: rows, error: rErr } = await sb
-          .from("budget_items")
-          .select("*")
+        const { data, error } = await sb
+          .from("wedding_budget")
+          .select("id,label,planned_cents,actual_cents")
           .eq("couple_id", uid)
-          .order("created_at", { ascending: true });
-        if (rErr) throw rErr;
+          .order("label", { ascending: true });
 
-        // Load WedFlex payments and add them (no status labels exposed)
-        const { data: pays, error: pErr } = await sb
-          .from("payments")
-          .select("amount_cents,status")
-          .eq("couple_id", uid);
-        if (pErr) throw pErr;
+        if (error) throw error;
 
-        // Sum of non-refunded payments — shown as “Booked on WedFlex”
-        const booked = (pays ?? [])
-          .filter((p: PaymentRow) => p.status !== "refunded")
-          .reduce((s: number, p: PaymentRow) => s + (p.amount_cents || 0), 0);
+        // initialize local editable state
+        const safeRows = (data ?? []).map((row) => ({
+          id: row.id,
+          label: row.label ?? "",
+          planned_cents: row.planned_cents ?? 0,
+          actual_cents: row.actual_cents ?? 0,
+        }));
 
-        setItems((rows ?? []) as BudgetItem[]);
-        setWedflexBookedCents(booked);
+        setLines(safeRows);
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       } finally {
@@ -94,326 +61,258 @@ export default function CoupleBudgetPage() {
     })();
   }, []);
 
-  // Totals (user-entered budget items)
-  const plannedTotal = useMemo(
-    () => items.reduce((s, i) => s + (i.planned_cents || 0), 0),
-    [items]
-  );
-  const actualTotal = useMemo(
-    () => items.reduce((s, i) => s + (i.actual_cents || 0), 0),
-    [items]
-  );
-
-  const varianceCents = plannedTotal - (actualTotal + wedflexBookedCents);
-  const remainingCents = Math.max(plannedTotal - (actualTotal + wedflexBookedCents), 0);
-
-  async function addItem() {
-    const sb = supabaseBrowser();
-    const { data: me } = await sb.auth.getUser();
-    if (!me?.user) return;
-
-    const row = {
-      couple_id: me.user.id,
-      name: draft.name.trim(),
-      category: draft.category.trim() || null,
-      planned_cents: dollarsToCents(draft.planned),
-      actual_cents: dollarsToCents(draft.actual),
-      notes: draft.notes.trim() || null,
+  // Derived totals
+  const totals = useMemo(() => {
+    let totalPlanned = 0;
+    let totalActual = 0;
+    for (const l of lines) {
+      totalPlanned += l.planned_cents || 0;
+      totalActual += l.actual_cents || 0;
+    }
+    return {
+      totalPlanned,
+      totalActual,
+      remaining: totalPlanned - totalActual,
     };
-    if (!row.name) return alert("Name is required");
+  }, [lines]);
 
-    const { data, error } = await sb
-      .from("budget_items")
-      .insert(row)
-      .select("*")
-      .single();
-    if (error) return alert(error.message);
-
-    setItems((arr) => [...arr, data as BudgetItem]);
-    setDraft({ name: "", category: "", planned: "", actual: "", notes: "" });
+  // Update one field in an existing budget row (local only)
+  function updateLine(id: string, field: "label" | "planned_cents" | "actual_cents", value: string) {
+    setLines((prev) =>
+      prev.map((row) => {
+        if (row.id !== id) return row;
+        if (field === "label") {
+          return { ...row, label: value };
+        }
+        // money fields come in as strings from <input type="number" />
+        const num = Number(value);
+        return {
+          ...row,
+          [field]: Number.isFinite(num) ? Math.round(num * 100) : 0, // store as cents
+        } as BudgetLine;
+      })
+    );
   }
 
-  function startEdit(i: BudgetItem) {
-    setEditingId(i.id);
-    setEditRow({
-      name: i.name,
-      category: i.category ?? "",
-      planned: (i.planned_cents / 100).toString(),
-      actual: (i.actual_cents / 100).toString(),
-      notes: i.notes ?? "",
-    });
+  // Because we're storing in cents inside state, we need helper to display dollars
+  function dollarsFromCents(cents: number | undefined): string {
+    if (!Number.isFinite(cents)) return "";
+    return (Math.round(cents || 0) / 100).toString();
   }
-function TextField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  inputMode,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
-}) {
-  return (
-    <label className="block">
-      <div className="text-sm mb-1">{label}</div>
-      <input
-        className="w-full border rounded px-3 py-2"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        inputMode={inputMode}
-      />
-    </label>
-  );
-}
 
-  async function saveEdit(id: string) {
-    const sb = supabaseBrowser();
-    const patch = {
-      name: editRow.name.trim(),
-      category: editRow.category.trim() || null,
-      planned_cents: dollarsToCents(editRow.planned),
-      actual_cents: dollarsToCents(editRow.actual),
-      notes: editRow.notes.trim() || null,
+  // Add brand-new row to local state (not saved yet)
+  function addNewLine() {
+    if (!newLabel.trim()) return;
+    const plannedNum = Number(newPlanned);
+    const actualNum = Number(newActual);
+
+    const newRow: BudgetLine = {
+      id: crypto.randomUUID(),
+      label: newLabel.trim(),
+      planned_cents: Number.isFinite(plannedNum)
+        ? Math.round(plannedNum * 100)
+        : 0,
+      actual_cents: Number.isFinite(actualNum)
+        ? Math.round(actualNum * 100)
+        : 0,
     };
-    if (!patch.name) return alert("Name is required");
 
-    const { data, error } = await sb
-      .from("budget_items")
-      .update(patch)
-      .eq("id", id)
-      .select("*")
-      .single();
-    if (error) return alert(error.message);
-
-    setItems((arr) => arr.map((row) => (row.id === id ? (data as BudgetItem) : row)));
-    setEditingId(null);
+    setLines((prev) => [...prev, newRow]);
+    setNewLabel("");
+    setNewPlanned("");
+    setNewActual("");
   }
 
-  async function removeItem(id: string) {
-    if (!confirm("Delete this budget item?")) return;
-    const sb = supabaseBrowser();
-    const { error } = await sb.from("budget_items").delete().eq("id", id);
-    if (error) return alert(error.message);
-    setItems((arr) => arr.filter((x) => x.id !== id));
+  // Persist all lines back to Supabase
+  async function saveAll() {
+    try {
+      setSaving(true);
+      setMsg(null);
+      setErr(null);
+
+      const sb = supabaseBrowser();
+      const { data: me } = await sb.auth.getUser();
+      if (!me?.user) throw new Error("Not authenticated");
+      const uid = me.user.id;
+
+      // We'll upsert each row for this couple_id
+      // (so both existing and new rows are saved)
+      const payload = lines.map((l) => ({
+        id: l.id,
+        couple_id: uid,
+        label: l.label,
+        planned_cents: l.planned_cents ?? 0,
+        actual_cents: l.actual_cents ?? 0,
+      }));
+
+      const { error } = await sb.from("wedding_budget").upsert(payload, {
+        onConflict: "id",
+      });
+      if (error) throw error;
+
+      setMsg("Budget saved.");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <RequireAuth>
       <main className="max-w-6xl mx-auto p-6 grid gap-6 lg:grid-cols-[240px_1fr]">
         <DashboardSidebar role="couple" />
+
         <section className="space-y-6">
-          <h1 className="text-2xl font-semibold">Wedding Budget</h1>
+          <header>
+            <h1 className="text-2xl font-semibold">Budget</h1>
+            <p className="text-sm text-slate-600">
+              Track what you planned to spend vs what you’ve actually booked (including WedFlex).
+            </p>
+          </header>
+
           {loading && <p>Loading…</p>}
-          {err && <p className="text-red-600">Error: {err}</p>}
+          {err && <p className="text-red-600 text-sm">Error: {err}</p>}
 
           {!loading && !err && (
             <>
-              {/* KPI Bar */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <Kpi label="Planned Total" value={`$${toDollars(plannedTotal)}`} />
-                <Kpi label="Actual (Manual Items)" value={`$${toDollars(actualTotal)}`} />
-                <Kpi
-                  label="Booked on WedFlex"
-                  value={`$${toDollars(wedflexBookedCents)}`}
-                />
-                <Kpi 
-                label="Remaining vs Planned" 
-                value={`$${toDollars(remainingCents)}`} 
-                />
-                <Kpi
-                  label="Variance (Planned - Actuals)"
-                  value={`$${toDollars(varianceCents)}`}
-                />
-              </div>
-
-              {/* Add Item */}
-              <section className="border rounded-lg p-4">
-                <h2 className="font-semibold mb-3">Add Budget Line Item</h2>
-                <div className="grid md:grid-cols-5 gap-3 items-end">
-                  <TextField
-                    label="Name *"
-                    value={draft.name}
-                    onChange={(v) => setDraft({ ...draft, name: v })}
-                    placeholder="Venue deposit"
-                  />
-                  <TextField
-                    label="Category"
-                    value={draft.category}
-                    onChange={(v) => setDraft({ ...draft, category: v })}
-                    placeholder="Venue"
-                  />
-                  <TextField
-                    label="Planned ($)"
-                    value={draft.planned}
-                    onChange={(v) => setDraft({ ...draft, planned: v })}
-                    placeholder="2000"
-                    inputMode="decimal"
-                  />
-                  <TextField
-                    label="Actual ($)"
-                    value={draft.actual}
-                    onChange={(v) => setDraft({ ...draft, actual: v })}
-                    placeholder="1500"
-                    inputMode="decimal"
-                  />
-                  <button
-                    onClick={addItem}
-                    className="h-10 bg-purple-700 text-white rounded px-4"
-                  >
-                    Add Item
-                  </button>
-                </div>
-                <div className="mt-3">
-                  <label className="block text-sm mb-1">Notes</label>
-                  <textarea
-                    className="w-full border rounded px-3 py-2"
-                    placeholder="Any additional detail…"
-                    value={draft.notes}
-                    onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
-                  />
-                </div>
-              </section>
-
-              {/* Table */}
-              <section className="border rounded-lg p-4">
-                <h2 className="font-semibold mb-3">Your Budget Items</h2>
-                {items.length === 0 ? (
-                  <p className="text-sm opacity-70">No items yet.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="text-left">
-                        <tr className="border-b">
-                          <th className="py-2 pr-3">Name</th>
-                          <th className="py-2 pr-3">Category</th>
-                          <th className="py-2 pr-3">Planned</th>
-                          <th className="py-2 pr-3">Actual</th>
-                          <th className="py-2 pr-3">Notes</th>
-                          <th className="py-2 pr-3"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {items.map((i) =>
-                          editingId === i.id ? (
-                            <tr key={i.id} className="border-b">
-                              <td className="py-2 pr-3">
-                                <input
-                                  className="w-full border rounded px-2 py-1"
-                                  value={editRow.name}
-                                  onChange={(e) => setEditRow({ ...editRow, name: e.target.value })}
-                                />
-                              </td>
-                              <td className="py-2 pr-3">
-                                <input
-                                  className="w-full border rounded px-2 py-1"
-                                  value={editRow.category}
-                                  onChange={(e) => setEditRow({ ...editRow, category: e.target.value })}
-                                />
-                              </td>
-                              <td className="py-2 pr-3">
-                                <input
-                                  className="w-full border rounded px-2 py-1"
-                                  inputMode="decimal"
-                                  value={editRow.planned}
-                                  onChange={(e) => setEditRow({ ...editRow, planned: e.target.value })}
-                                />
-                              </td>
-                              <td className="py-2 pr-3">
-                                <input
-                                  className="w-full border rounded px-2 py-1"
-                                  inputMode="decimal"
-                                  value={editRow.actual}
-                                  onChange={(e) => setEditRow({ ...editRow, actual: e.target.value })}
-                                />
-                              </td>
-                              <td className="py-2 pr-3">
-                                <input
-                                  className="w-full border rounded px-2 py-1"
-                                  value={editRow.notes}
-                                  onChange={(e) => setEditRow({ ...editRow, notes: e.target.value })}
-                                />
-                              </td>
-                              <td className="py-2 pr-3 text-right">
-                                <button
-                                  onClick={() => saveEdit(i.id)}
-                                  className="mr-2 px-3 py-1 rounded bg-green-600 text-white"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  onClick={() => setEditingId(null)}
-                                  className="px-3 py-1 rounded border"
-                                >
-                                  Cancel
-                                </button>
-                              </td>
-                            </tr>
-                          ) : (
-                            <tr key={i.id} className="border-b">
-                              <td className="py-2 pr-3">{i.name}</td>
-                              <td className="py-2 pr-3">{i.category ?? "—"}</td>
-                              <td className="py-2 pr-3">${toDollars(i.planned_cents)}</td>
-                              <td className="py-2 pr-3">${toDollars(i.actual_cents)}</td>
-                              <td className="py-2 pr-3">{i.notes ?? "—"}</td>
-                              <td className="py-2 pr-3 text-right">
-                                <button
-                                  onClick={() => startEdit(i)}
-                                  className="mr-2 px-3 py-1 rounded border"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => removeItem(i.id)}
-                                  className="px-3 py-1 rounded bg-red-600 text-white"
-                                >
-                                  Delete
-                                </button>
-                              </td>
-                            </tr>
-                          )
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
-
-              {/* Summary */}
+              {/* Summary KPIs */}
               <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <SummaryCard title="Planned Total" amountCents={plannedTotal} />
-                <SummaryCard title="Actuals (Manual Items)" amountCents={actualTotal} />
-                <SummaryCard title="Booked on WedFlex" amountCents={wedflexBookedCents} />
+                <div className="border rounded-lg p-4">
+                  <div className="text-xs uppercase text-slate-500">Planned Total</div>
+                  <div className="text-xl font-semibold">
+                    ${ (totals.totalPlanned / 100).toLocaleString() }
+                  </div>
+                </div>
+
+                <div className="border rounded-lg p-4">
+                  <div className="text-xs uppercase text-slate-500">Actual / Booked So Far</div>
+                  <div className="text-xl font-semibold">
+                    ${ (totals.totalActual / 100).toLocaleString() }
+                  </div>
+                </div>
+
+                <div className="border rounded-lg p-4">
+                  <div className="text-xs uppercase text-slate-500">Remaining</div>
+                  <div className="text-xl font-semibold">
+                    ${ (totals.remaining / 100).toLocaleString() }
+                  </div>
+                </div>
               </section>
 
-              <div className="text-sm opacity-70">
-                * “Booked on WedFlex” is the total of your payments on WedFlex (refunds excluded). We don’t show internal payment statuses here.
+              {/* Editable budget table */}
+              <section className="border rounded-lg p-4">
+                <h2 className="font-semibold mb-3">Your Budget Lines</h2>
+
+                <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr] gap-2 text-xs text-slate-500 mb-2">
+                  <div>Category / Description</div>
+                  <div className="text-right">Planned $</div>
+                  <div className="text-right">Actual $</div>
+                </div>
+
+                <ul className="space-y-3">
+                  {lines.map((row) => (
+                    <li
+                      key={row.id}
+                      className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr] gap-2 items-start"
+                    >
+                      {/* Label */}
+                      <input
+                        className="border rounded px-3 py-2 text-sm w-full"
+                        value={row.label}
+                        onChange={(e) =>
+                          updateLine(row.id, "label", e.target.value)
+                        }
+                        placeholder="Flowers, DJ, Venue deposit…"
+                      />
+
+                      {/* Planned dollars */}
+                      <input
+                        className="border rounded px-3 py-2 text-sm w-full text-right"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={dollarsFromCents(row.planned_cents)}
+                        onChange={(e) =>
+                          updateLine(row.id, "planned_cents", e.target.value)
+                        }
+                        placeholder="0.00"
+                      />
+
+                      {/* Actual dollars */}
+                      <input
+                        className="border rounded px-3 py-2 text-sm w-full text-right"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={dollarsFromCents(row.actual_cents)}
+                        onChange={(e) =>
+                          updateLine(row.id, "actual_cents", e.target.value)
+                        }
+                        placeholder="0.00"
+                      />
+                    </li>
+                  ))}
+                </ul>
+
+                {/* Add new line inline */}
+                <div className="mt-6 border-t pt-4 grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr] gap-2">
+                  <input
+                    className="border rounded px-3 py-2 text-sm w-full"
+                    value={newLabel}
+                    onChange={(e) => setNewLabel(e.target.value)}
+                    placeholder="New item (ex. Bartender)"
+                  />
+                  <input
+                    className="border rounded px-3 py-2 text-sm w-full text-right"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={newPlanned}
+                    onChange={(e) => setNewPlanned(e.target.value)}
+                    placeholder="0.00"
+                  />
+                  <input
+                    className="border rounded px-3 py-2 text-sm w-full text-right"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={newActual}
+                    onChange={(e) => setNewActual(e.target.value)}
+                    placeholder="0.00"
+                  />
+                  <div className="sm:col-span-3 flex justify-end">
+                    <button
+                      onClick={addNewLine}
+                      className="bg-purple-700 text-white text-xs font-medium px-3 py-2 rounded hover:bg-purple-800"
+                    >
+                      + Add Line
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              {/* Save button & messages */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={saveAll}
+                  disabled={saving}
+                  className="bg-purple-700 text-white rounded px-4 py-2 text-sm font-medium disabled:opacity-60"
+                >
+                  {saving ? "Saving…" : "Save Budget"}
+                </button>
+
+                {msg && (
+                  <span className="text-green-700 text-sm">{msg}</span>
+                )}
+                {err && (
+                  <span className="text-red-600 text-sm">Error: {err}</span>
+                )}
               </div>
             </>
           )}
         </section>
       </main>
     </RequireAuth>
-  );
-}
-
-function Kpi({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border rounded-lg p-3 bg-purple-50">
-      <div className="text-xs opacity-70">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function SummaryCard({ title, amountCents }: { title: string; amountCents: number }) {
-  return (
-    <div className="border rounded-lg p-4">
-      <div className="text-sm opacity-70">{title}</div>
-      <div className="text-xl font-semibold">${toDollars(amountCents)}</div>
-    </div>
   );
 }

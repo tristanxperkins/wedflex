@@ -1,4 +1,5 @@
-// src/app/api/open-requests/route.ts
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
