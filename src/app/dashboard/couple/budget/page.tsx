@@ -238,13 +238,13 @@ function TextField({
                     label="Name *"
                     value={draft.name}
                     onChange={(v) => setDraft({ ...draft, name: v })}
-                    placeholder="Venue deposit"
+                    placeholder="Venue"
                   />
                   <TextField
                     label="Category"
                     value={draft.category}
                     onChange={(v) => setDraft({ ...draft, category: v })}
-                    placeholder="Venue"
+                    placeholder="Deposit"
                   />
                   <TextField
                     label="Planned ($)"

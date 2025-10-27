@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
 import { NextResponse, type NextRequest } from "next/server";
 import { headers } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
