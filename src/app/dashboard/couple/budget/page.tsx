@@ -209,8 +209,8 @@ export default function CoupleBudgetPage() {
           <header>
             <h1 className="text-2xl font-semibold">Budget</h1>
             <p className="text-sm opacity-70">
-              Track your wedding budget, what you've planned vs what you've
-              actually booked and spent — plus what you've already booked on
+              Track your wedding budget, what you have planned vs what you have
+              actually booked and spent — plus what you have already booked on
               WedFlex.
             </p>
           </header>

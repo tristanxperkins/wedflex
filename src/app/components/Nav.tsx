@@ -430,13 +430,13 @@ export default function Nav() {
                   onClick={() => switchRole("couple")}
                   className="px-2 py-1 rounded-full border bg-white hover:text-purple-700"
                 >
-                  I'm a Couple
+                  I am planning a wedding
                 </button>
                 <button
                   onClick={() => switchRole("wedflexer")}
                   className="px-2 py-1 rounded-full border bg-white hover:text-purple-700"
                 >
-                  I'm a WedFlexer
+                  I am a WedFlexer
                 </button>
               </div>
             )}
