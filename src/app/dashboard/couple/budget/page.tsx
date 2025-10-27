@@ -1,158 +1,200 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import RequireAuth from "../../../components/RequireAuth";
 import DashboardSidebar from "../../../components/DashboardSidebar";
 import { supabaseBrowser } from "../../../supabase/client";
 
-type BudgetLine = {
+type BudgetRow = {
   id: string;
-  label: string;
+  category: string;
+  description: string | null;
   planned_cents: number;
   actual_cents: number;
 };
 
+function dollars(nCents: number) {
+  return `$${(nCents / 100).toLocaleString()}`;
+}
+
+function toErrorString(x: unknown): string {
+  if (!x) return "Unknown error";
+  if (typeof x === "string") return x;
+  if (x instanceof Error) return x.message;
+  try {
+    return JSON.stringify(x);
+  } catch {
+    return String(x);
+  }
+}
+
 export default function CoupleBudgetPage() {
-  const [lines, setLines] = useState<BudgetLine[]>([]);
+  const [rows, setRows] = useState<BudgetRow[]>([]);
+  const [plannedInputs, setPlannedInputs] = useState<Record<string, string>>({});
+  const [actualInputs, setActualInputs] = useState<Record<string, string>>({});
+  const [catInputs, setCatInputs] = useState<Record<string, string>>({});
+  const [descInputs, setDescInputs] = useState<Record<string, string>>({});
+  const [newCat, setNewCat] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newPlanned, setNewPlanned] = useState("");
+  const [newActual, setNewActual] = useState("");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // local "new row" inputs
-  const [newLabel, setNewLabel] = useState("");
-  const [newPlanned, setNewPlanned] = useState<string>("");
-  const [newActual, setNewActual] = useState<string>("");
+  // fetch budget + total paid via WedFlex (payments table status escrowed/released)
+  const totalBookedOnWedflex = useMemo(() => {
+    // You could also fetch this from payments (sum for this couple).
+    // For now assume we might compute it later dynamically.
+    return 0;
+  }, []);
 
-  // Load budget rows for the logged-in couple
   useEffect(() => {
     (async () => {
       try {
         const sb = supabaseBrowser();
         const { data: me } = await sb.auth.getUser();
-        if (!me?.user) {
-          throw new Error("Not authenticated");
-        }
-
+        if (!me?.user) throw new Error("Not authenticated");
         const uid = me.user.id;
 
         const { data, error } = await sb
-          .from("wedding_budget")
-          .select("id,label,planned_cents,actual_cents")
+          .from("budget_items")
+          .select("*")
           .eq("couple_id", uid)
-          .order("label", { ascending: true });
-
+          .order("created_at", { ascending: true });
         if (error) throw error;
 
-        // initialize local editable state
-        const safeRows = (data ?? []).map((row) => ({
-          id: row.id,
-          label: row.label ?? "",
-          planned_cents: row.planned_cents ?? 0,
-          actual_cents: row.actual_cents ?? 0,
-        }));
+        // init local state
+        const list = (data || []) as BudgetRow[];
+        setRows(list);
 
-        setLines(safeRows);
+        // initialize editable inputs so typing is smooth
+        const newPlannedMap: Record<string, string> = {};
+        const newActualMap: Record<string, string> = {};
+        const newCatMap: Record<string, string> = {};
+        const newDescMap: Record<string, string> = {};
+        for (const r of list) {
+          newPlannedMap[r.id] = (r.planned_cents / 100).toString();
+          newActualMap[r.id] = (r.actual_cents / 100).toString();
+          newCatMap[r.id] = r.category;
+          newDescMap[r.id] = r.description ?? "";
+        }
+        setPlannedInputs(newPlannedMap);
+        setActualInputs(newActualMap);
+        setCatInputs(newCatMap);
+        setDescInputs(newDescMap);
       } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        setErr(toErrorString(e));
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  // Derived totals
-  const totals = useMemo(() => {
-    let totalPlanned = 0;
-    let totalActual = 0;
-    for (const l of lines) {
-      totalPlanned += l.planned_cents || 0;
-      totalActual += l.actual_cents || 0;
-    }
-    return {
-      totalPlanned,
-      totalActual,
-      remaining: totalPlanned - totalActual,
-    };
-  }, [lines]);
+  const plannedTotal = useMemo(() => {
+    return rows.reduce((sum, r) => sum + r.planned_cents, 0);
+  }, [rows]);
 
-  // Update one field in an existing budget row (local only)
-  function updateLine(id: string, field: "label" | "planned_cents" | "actual_cents", value: string) {
-    setLines((prev) =>
-      prev.map((row) => {
-        if (row.id !== id) return row;
-        if (field === "label") {
-          return { ...row, label: value };
-        }
-        // money fields come in as strings from <input type="number" />
-        const num = Number(value);
-        return {
-          ...row,
-          [field]: Number.isFinite(num) ? Math.round(num * 100) : 0, // store as cents
-        } as BudgetLine;
-      })
-    );
-  }
+  const actualTotal = useMemo(() => {
+    return rows.reduce((sum, r) => sum + r.actual_cents, 0);
+  }, [rows]);
 
-  // Because we're storing in cents inside state, we need helper to display dollars
-  function dollarsFromCents(cents: number | undefined): string {
-    if (!Number.isFinite(cents)) return "";
-    return (Math.round(cents || 0) / 100).toString();
-  }
-
-  // Add brand-new row to local state (not saved yet)
-  function addNewLine() {
-    if (!newLabel.trim()) return;
-    const plannedNum = Number(newPlanned);
-    const actualNum = Number(newActual);
-
-    const newRow: BudgetLine = {
-      id: crypto.randomUUID(),
-      label: newLabel.trim(),
-      planned_cents: Number.isFinite(plannedNum)
-        ? Math.round(plannedNum * 100)
-        : 0,
-      actual_cents: Number.isFinite(actualNum)
-        ? Math.round(actualNum * 100)
-        : 0,
-    };
-
-    setLines((prev) => [...prev, newRow]);
-    setNewLabel("");
-    setNewPlanned("");
-    setNewActual("");
-  }
-
-  // Persist all lines back to Supabase
-  async function saveAll() {
+  async function saveRow(id: string) {
     try {
       setSaving(true);
-      setMsg(null);
+      setErr(null);
+
+      const sb = supabaseBrowser();
+      const plannedNum = Math.round(
+        parseFloat(plannedInputs[id] || "0") * 100
+      );
+      const actualNum = Math.round(
+        parseFloat(actualInputs[id] || "0") * 100
+      );
+      const catVal = catInputs[id] || "";
+      const descVal = descInputs[id] || "";
+
+      const { error } = await sb
+        .from("budget_items")
+        .update({
+          category: catVal,
+          description: descVal,
+          planned_cents: plannedNum,
+          actual_cents: actualNum,
+        })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      // update local rows[]
+      setRows((old) =>
+        old.map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                category: catVal,
+                description: descVal,
+                planned_cents: plannedNum,
+                actual_cents: actualNum,
+              }
+            : r
+        )
+      );
+    } catch (e) {
+      setErr(toErrorString(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addRow() {
+    try {
+      setSaving(true);
       setErr(null);
 
       const sb = supabaseBrowser();
       const { data: me } = await sb.auth.getUser();
       if (!me?.user) throw new Error("Not authenticated");
-      const uid = me.user.id;
 
-      // We'll upsert each row for this couple_id
-      // (so both existing and new rows are saved)
-      const payload = lines.map((l) => ({
-        id: l.id,
-        couple_id: uid,
-        label: l.label,
-        planned_cents: l.planned_cents ?? 0,
-        actual_cents: l.actual_cents ?? 0,
-      }));
+      const plannedNum = Math.round(parseFloat(newPlanned || "0") * 100);
+      const actualNum = Math.round(parseFloat(newActual || "0") * 100);
 
-      const { error } = await sb.from("wedding_budget").upsert(payload, {
-        onConflict: "id",
-      });
+      const { data, error } = await sb
+        .from("budget_items")
+        .insert({
+          couple_id: me.user.id,
+          category: newCat || "Other",
+          description: newDesc || "",
+          planned_cents: plannedNum,
+          actual_cents: actualNum,
+        })
+        .select("*")
+        .single();
+
       if (error) throw error;
 
-      setMsg("Budget saved.");
+      const row = data as BudgetRow;
+
+      setRows((old) => [...old, row]);
+
+      setCatInputs((m) => ({ ...m, [row.id]: row.category }));
+      setDescInputs((m) => ({ ...m, [row.id]: row.description ?? "" }));
+      setPlannedInputs((m) => ({
+        ...m,
+        [row.id]: (row.planned_cents / 100).toString(),
+      }));
+      setActualInputs((m) => ({
+        ...m,
+        [row.id]: (row.actual_cents / 100).toString(),
+      }));
+
+      // clear new-row inputs
+      setNewCat("");
+      setNewDesc("");
+      setNewPlanned("");
+      setNewActual("");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(toErrorString(e));
     } finally {
       setSaving(false);
     }
@@ -166,149 +208,214 @@ export default function CoupleBudgetPage() {
         <section className="space-y-6">
           <header>
             <h1 className="text-2xl font-semibold">Budget</h1>
-            <p className="text-sm text-slate-600">
-              Track what you planned to spend vs what you’ve actually booked (including WedFlex).
+            <p className="text-sm opacity-70">
+              Track your wedding budget, what you've planned vs what you've
+              actually booked and spent — plus what you've already booked on
+              WedFlex.
             </p>
           </header>
 
-          {loading && <p>Loading…</p>}
-          {err && <p className="text-red-600 text-sm">Error: {err}</p>}
+          {err && (
+            <p className="text-red-600 text-sm break-words">
+              Error: {err}
+            </p>
+          )}
 
-          {!loading && !err && (
+          {loading ? (
+            <p>Loading…</p>
+          ) : (
             <>
-              {/* Summary KPIs */}
-              <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="border rounded-lg p-4">
-                  <div className="text-xs uppercase text-slate-500">Planned Total</div>
+                  <div className="text-xs opacity-70">Planned Total</div>
                   <div className="text-xl font-semibold">
-                    ${ (totals.totalPlanned / 100).toLocaleString() }
+                    {dollars(plannedTotal)}
                   </div>
                 </div>
-
                 <div className="border rounded-lg p-4">
-                  <div className="text-xs uppercase text-slate-500">Actual / Booked So Far</div>
+                  <div className="text-xs opacity-70">Actual Total</div>
                   <div className="text-xl font-semibold">
-                    ${ (totals.totalActual / 100).toLocaleString() }
+                    {dollars(actualTotal)}
                   </div>
                 </div>
-
                 <div className="border rounded-lg p-4">
-                  <div className="text-xs uppercase text-slate-500">Remaining</div>
+                  <div className="text-xs opacity-70">
+                    Booked on WedFlex
+                  </div>
                   <div className="text-xl font-semibold">
-                    ${ (totals.remaining / 100).toLocaleString() }
+                    {dollars(totalBookedOnWedflex * 100 /* placeholder */)}
                   </div>
                 </div>
-              </section>
-
-              {/* Editable budget table */}
-              <section className="border rounded-lg p-4">
-                <h2 className="font-semibold mb-3">Your Budget Lines</h2>
-
-                <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr] gap-2 text-xs text-slate-500 mb-2">
-                  <div>Category / Description</div>
-                  <div className="text-right">Planned $</div>
-                  <div className="text-right">Actual $</div>
-                </div>
-
-                <ul className="space-y-3">
-                  {lines.map((row) => (
-                    <li
-                      key={row.id}
-                      className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr] gap-2 items-start"
-                    >
-                      {/* Label */}
-                      <input
-                        className="border rounded px-3 py-2 text-sm w-full"
-                        value={row.label}
-                        onChange={(e) =>
-                          updateLine(row.id, "label", e.target.value)
-                        }
-                        placeholder="Flowers, DJ, Venue deposit…"
-                      />
-
-                      {/* Planned dollars */}
-                      <input
-                        className="border rounded px-3 py-2 text-sm w-full text-right"
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={dollarsFromCents(row.planned_cents)}
-                        onChange={(e) =>
-                          updateLine(row.id, "planned_cents", e.target.value)
-                        }
-                        placeholder="0.00"
-                      />
-
-                      {/* Actual dollars */}
-                      <input
-                        className="border rounded px-3 py-2 text-sm w-full text-right"
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={dollarsFromCents(row.actual_cents)}
-                        onChange={(e) =>
-                          updateLine(row.id, "actual_cents", e.target.value)
-                        }
-                        placeholder="0.00"
-                      />
-                    </li>
-                  ))}
-                </ul>
-
-                {/* Add new line inline */}
-                <div className="mt-6 border-t pt-4 grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr] gap-2">
-                  <input
-                    className="border rounded px-3 py-2 text-sm w-full"
-                    value={newLabel}
-                    onChange={(e) => setNewLabel(e.target.value)}
-                    placeholder="New item (ex. Bartender)"
-                  />
-                  <input
-                    className="border rounded px-3 py-2 text-sm w-full text-right"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={newPlanned}
-                    onChange={(e) => setNewPlanned(e.target.value)}
-                    placeholder="0.00"
-                  />
-                  <input
-                    className="border rounded px-3 py-2 text-sm w-full text-right"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={newActual}
-                    onChange={(e) => setNewActual(e.target.value)}
-                    placeholder="0.00"
-                  />
-                  <div className="sm:col-span-3 flex justify-end">
-                    <button
-                      onClick={addNewLine}
-                      className="bg-purple-700 text-white text-xs font-medium px-3 py-2 rounded hover:bg-purple-800"
-                    >
-                      + Add Line
-                    </button>
+                <div className="border rounded-lg p-4">
+                  <div className="text-xs opacity-70">
+                    Difference (Planned vs Actual)
+                  </div>
+                  <div className="text-xl font-semibold">
+                    {dollars(actualTotal - plannedTotal)}
                   </div>
                 </div>
-              </section>
-
-              {/* Save button & messages */}
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={saveAll}
-                  disabled={saving}
-                  className="bg-purple-700 text-white rounded px-4 py-2 text-sm font-medium disabled:opacity-60"
-                >
-                  {saving ? "Saving…" : "Save Budget"}
-                </button>
-
-                {msg && (
-                  <span className="text-green-700 text-sm">{msg}</span>
-                )}
-                {err && (
-                  <span className="text-red-600 text-sm">Error: {err}</span>
-                )}
               </div>
+
+              <section className="border rounded-lg p-4 space-y-4">
+                <h2 className="font-semibold">Your Budget Items</h2>
+
+                {rows.length === 0 ? (
+                  <p className="text-sm opacity-70">
+                    No budget items yet. Add your first below.
+                  </p>
+                ) : (
+                  <ul className="space-y-4">
+                    {rows.map((r) => (
+                      <li
+                        key={r.id}
+                        className="border rounded p-3 text-sm grid gap-3 md:grid-cols-4"
+                      >
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs opacity-70">
+                            Category
+                          </label>
+                          <input
+                            className="border rounded px-2 py-1 text-sm"
+                            value={catInputs[r.id] ?? ""}
+                            onChange={(e) =>
+                              setCatInputs((m) => ({
+                                ...m,
+                                [r.id]: e.target.value,
+                              }))
+                            }
+                          />
+                          <label className="text-xs opacity-70">
+                            Description
+                          </label>
+                          <input
+                            className="border rounded px-2 py-1 text-sm"
+                            value={descInputs[r.id] ?? ""}
+                            onChange={(e) =>
+                              setDescInputs((m) => ({
+                                ...m,
+                                [r.id]: e.target.value,
+                              }))
+                            }
+                            placeholder="Flowers, DJ deposit, etc."
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <label className="text-xs opacity-70">
+                            Planned ($)
+                          </label>
+                          <input
+                            type="text"
+                            className="border rounded px-2 py-1 text-sm"
+                            value={plannedInputs[r.id] ?? ""}
+                            onChange={(e) =>
+                              setPlannedInputs((m) => ({
+                                ...m,
+                                [r.id]: e.target.value,
+                              }))
+                            }
+                          />
+                          <label className="text-xs opacity-70">
+                            Actual ($)
+                          </label>
+                          <input
+                            type="text"
+                            className="border rounded px-2 py-1 text-sm"
+                            value={actualInputs[r.id] ?? ""}
+                            onChange={(e) =>
+                              setActualInputs((m) => ({
+                                ...m,
+                                [r.id]: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+
+                        <div className="flex flex-col justify-end">
+                          <button
+                            className="bg-purple-700 text-white rounded px-3 py-2 text-xs"
+                            disabled={saving}
+                            onClick={() => saveRow(r.id)}
+                          >
+                            {saving ? "Saving…" : "Save Row"}
+                          </button>
+                        </div>
+
+                        <div className="text-xs opacity-70 self-end md:self-start">
+                          Planned: {dollars(r.planned_cents)} <br />
+                          Actual: {dollars(r.actual_cents)}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {/* Add new item row */}
+                <div className="border-t pt-4">
+                  <h3 className="text-sm font-medium mb-2">
+                    Add Budget Item
+                  </h3>
+                  <div className="grid gap-3 md:grid-cols-4 text-sm">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs opacity-70">
+                        Category
+                      </label>
+                      <input
+                        className="border rounded px-2 py-1 text-sm"
+                        value={newCat}
+                        onChange={(e) => setNewCat(e.target.value)}
+                        placeholder="Flowers"
+                      />
+                      <label className="text-xs opacity-70">
+                        Description
+                      </label>
+                      <input
+                        className="border rounded px-2 py-1 text-sm"
+                        value={newDesc}
+                        onChange={(e) => setNewDesc(e.target.value)}
+                        placeholder="Bridal bouquet"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs opacity-70">
+                        Planned ($)
+                      </label>
+                      <input
+                        type="text"
+                        className="border rounded px-2 py-1 text-sm"
+                        value={newPlanned}
+                        onChange={(e) => setNewPlanned(e.target.value)}
+                        placeholder="500"
+                      />
+                      <label className="text-xs opacity-70">
+                        Actual ($)
+                      </label>
+                      <input
+                        type="text"
+                        className="border rounded px-2 py-1 text-sm"
+                        value={newActual}
+                        onChange={(e) => setNewActual(e.target.value)}
+                        placeholder="450"
+                      />
+                    </div>
+
+                    <div className="flex flex-col justify-end">
+                      <button
+                        className="bg-purple-700 text-white rounded px-3 py-2 text-xs"
+                        disabled={saving}
+                        onClick={addRow}
+                      >
+                        {saving ? "Adding…" : "Add Item"}
+                      </button>
+                    </div>
+
+                    <div className="text-xs opacity-70 self-end md:self-start">
+                      WedFlex booked so far: {dollars(totalBookedOnWedflex * 100 /* placeholder */)}
+                    </div>
+                  </div>
+                </div>
+              </section>
             </>
           )}
         </section>

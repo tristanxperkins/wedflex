@@ -5,10 +5,8 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { supabaseBrowser } from "../supabase/client";
 
-/** Roles we recognize */
 type ActiveRole = "couple" | "wedflexer" | null;
 
-/** tiny classnames helper */
 function cx(...a: (string | false | null | undefined)[]) {
   return a.filter(Boolean).join(" ");
 }
@@ -16,22 +14,14 @@ function cx(...a: (string | false | null | undefined)[]) {
 export default function Nav() {
   const [email, setEmail] = useState<string | null>(null);
   const [role, setRole] = useState<ActiveRole>(null);
-
-  // "hasCouple" = they've ever acted as a couple (ex: posted an offer)
-  // "hasWedflexer" = they've ever acted as a wedflexer (ex: applied)
   const [hasCouple, setHasCouple] = useState(false);
   const [hasWedflexer, setHasWedflexer] = useState(false);
-
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
   const router = useRouter();
   const pathname = usePathname();
 
-  // On mount (and when path changes), fetch:
-  // - current authenticated user (if any)
-  // - active_role from profiles
-  // - evidence of couple/wedflexer roles
   useEffect(() => {
     (async () => {
       try {
@@ -40,7 +30,6 @@ export default function Nav() {
         if (userErr) throw userErr;
 
         if (!userData?.user) {
-          // not signed in
           setEmail(null);
           setRole(null);
           setHasCouple(false);
@@ -51,21 +40,17 @@ export default function Nav() {
         const u = userData.user;
         setEmail(u.email ?? "");
 
-        // 1) grab active_role from profiles
         const { data: prof, error: profErr } = await sb
           .from("profiles")
           .select("active_role")
           .eq("id", u.id)
           .single();
 
-        if (profErr && profErr.code !== "PGRST116") {
+        if (profErr && (profErr as { code?: string }).code !== "PGRST116") {
           throw profErr;
         }
         setRole((prof?.active_role as ActiveRole) ?? null);
 
-        // 2) figure out if they "haveCouple" or "haveWedflexer"
-        // couple: any posted service_requests
-        // wedflexer: any submitted applications
         const [{ count: coupleCnt, error: cErr }, { count: wedCnt, error: wErr }] =
           await Promise.all([
             sb
@@ -91,18 +76,12 @@ export default function Nav() {
     })();
   }, [pathname]);
 
-  //
-  // switchRole:
-  // - if user not signed in at all, send them to signin with the desired role hint
-  // - if they don't have that role yet, send them to onboarding funnel (post-your-first-offer or earn-money)
-  // - if they do, persist active_role in /api/me and route to dashboard
-  //
   async function switchRole(next: Exclude<ActiveRole, null>) {
     try {
       const sb = supabaseBrowser();
       const { data: userData } = await sb.auth.getUser();
 
-      // case 0: not logged in
+      // not logged in at all -> send to correct onboarding funnel
       if (!userData?.user) {
         if (next === "couple") {
           router.push("/post-your-first-offer");
@@ -112,21 +91,17 @@ export default function Nav() {
         return;
       }
 
-      const uid = userData.user.id;
-
-      // case 1: user is logged in but hasn't established that role
+      // logged in, but not established as that role yet
       if (next === "couple" && !hasCouple) {
-        // no popup, just go to couple onboarding funnel
         router.push("/post-your-first-offer");
         return;
       }
       if (next === "wedflexer" && !hasWedflexer) {
-        // no popup, just go to wedflexer onboarding funnel
         router.push("/earn-money");
         return;
       }
 
-      // case 2: user has that role; save as active_role and go to dashboard
+      // already has that role -> persist active_role and route to dashboard
       const res = await fetch("/api/me", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -135,7 +110,6 @@ export default function Nav() {
 
       const json = await res.json();
       if (!res.ok || !json?.ok) {
-        // if PATCH fails for some reason, fall back to just routing
         console.warn("Failed to persist active_role", json);
       } else {
         setRole(next);
@@ -144,7 +118,6 @@ export default function Nav() {
       router.push(next === "couple" ? "/dashboard/couple" : "/dashboard/wedflexer");
     } catch (e) {
       console.error("switchRole error:", e);
-      // fail-soft: route them to funnel if something explodes
       if (next === "couple") {
         router.push("/post-your-first-offer");
       } else {
@@ -153,11 +126,9 @@ export default function Nav() {
     }
   }
 
-  // convenience booleans
   const isSignedIn = !!email;
   const bothRoles = hasCouple && hasWedflexer;
 
-  // nav link sets for clarity
   function GuestLinks() {
     return (
       <>
@@ -185,7 +156,8 @@ export default function Nav() {
           href="/post-your-first-offer"
           className={cx(
             "hover:text-purple-700",
-            pathname === "/post-your-first-offer" && "font-semibold text-purple-700"
+            pathname === "/post-your-first-offer" &&
+              "font-semibold text-purple-700"
           )}
         >
           Post your first offer
@@ -299,8 +271,6 @@ export default function Nav() {
   }
 
   function BothLinks() {
-    // Both roles unlocked → show the full power nav:
-    // Home | Mission | Browse Offers | Post Offer | Dashboard
     return (
       <>
         <Link
@@ -359,34 +329,31 @@ export default function Nav() {
     );
   }
 
-  // render -------------------------------------------------------------
-
   return (
     <nav className="flex flex-col md:flex-row md:items-center md:justify-between text-slate-800 gap-3 md:gap-0">
-      {/* Brand / left side */}
+      {/* left / brand */}
       <div className="flex items-center justify-between">
         <Link href="/" className="text-2xl font-extrabold text-purple-700">
           WedFlex
         </Link>
       </div>
 
-      {/* Center links */}
+      {/* center links */}
       <div className="flex flex-wrap gap-4 text-sm">
-        {loading ? null : !isSignedIn ? (
-          <GuestLinks />
-        ) : bothRoles ? (
-          <BothLinks />
-        ) : hasCouple ? (
-          <CoupleLinksOnly />
-        ) : hasWedflexer ? (
-          <WedflexerLinksOnly />
-        ) : (
-          // edge case: signed in but hasn't done either role yet
-          <GuestLinks />
-        )}
+        {loading
+          ? null
+          : !isSignedIn
+          ? <GuestLinks />
+          : bothRoles
+          ? <BothLinks />
+          : hasCouple
+          ? <CoupleLinksOnly />
+          : hasWedflexer
+          ? <WedflexerLinksOnly />
+          : <GuestLinks />}
       </div>
 
-      {/* Right side: auth / identity */}
+      {/* right / auth state */}
       <div className="flex items-center gap-3">
         {!isSignedIn && !loading && (
           <Link
@@ -399,7 +366,6 @@ export default function Nav() {
 
         {!!isSignedIn && (
           <div className="flex items-center gap-2">
-            {/* Email display */}
             <span
               className="text-sm text-slate-700 truncate max-w-[180px]"
               title={email || ""}
@@ -407,9 +373,7 @@ export default function Nav() {
               {email}
             </span>
 
-            {/* Role UI: */}
             {bothRoles ? (
-              // toggle pill
               <div className="bg-slate-100 border rounded-full flex text-xs">
                 <button
                   onClick={() => switchRole("couple")}
@@ -461,19 +425,18 @@ export default function Nav() {
                 </button>
               </div>
             ) : (
-              // rare: logged in but has neither role activity yet
               <div className="flex items-center gap-2 text-xs">
                 <button
                   onClick={() => switchRole("couple")}
                   className="px-2 py-1 rounded-full border bg-white hover:text-purple-700"
                 >
-                  I am planning a Wedding
+                  I'm a Couple
                 </button>
                 <button
                   onClick={() => switchRole("wedflexer")}
                   className="px-2 py-1 rounded-full border bg-white hover:text-purple-700"
                 >
-                  I am a WedFlexer
+                  I'm a WedFlexer
                 </button>
               </div>
             )}
@@ -481,8 +444,8 @@ export default function Nav() {
         )}
       </div>
 
-      {/* Optional tiny debug (hide in prod) */}
-      {/* {loadErr && (
+      {/* debug helper for us
+      {loadErr && (
         <div className="text-[10px] text-red-600 max-w-xs break-words">
           Nav error: {loadErr}
         </div>
