@@ -23,9 +23,7 @@ export default function MissionPage() {
         </p>
 
         <p>
-          We believe in hometown economies. We believe in paying people for
-          their skills. We believe in pulling off beautiful days without shame or gatekeeping. Because the wedding industry as we know
-          is out of hand when it comes with sticker shock, complex contracts, and a whole lot of stress. WedFlex was born from a simple idea
+          Anyone who has planned or been in a wedding knows the wedding industry is out of hand. The experience goes from excitement to sticker shock to reading contract fine print, and a whole lot of stress. WedFlex was born from a simple idea
           If couples can name their price, and talented people in the community can meet their needs, we can change the entire structure of the
           wedding industry. We are not just a marketplace to bring both sides together - we are a movement. A movement that brings the focus back
           to support marriages and stregthening the community. WedFlex is a win-win. Join the movement today!

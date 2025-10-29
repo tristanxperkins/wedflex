@@ -118,3 +118,121 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+// ✅ POST (the sender creates/uses a thread, then inserts a message)
+export async function POST(req: NextRequest) {
+  try {
+    const hdrs = await headers();
+    const authHeader = hdrs.get("authorization") ?? "";
+    const supabase = createClient(url, anon, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    // who am I
+    const { data: me, error: meErr } = await supabase.auth.getUser();
+    if (meErr || !me?.user) {
+      return NextResponse.json(
+        { ok: false, error: "Not authenticated" },
+        { status: 401 }
+      );
+    }
+    const selfId = me.user.id;
+
+    // body from client
+    const { other_id, request_id, body, file_url } = await req.json();
+
+    if (!other_id || (typeof other_id !== "string")) {
+      return NextResponse.json(
+        { ok: false, error: "Missing other_id" },
+        { status: 400 }
+      );
+    }
+
+    // STEP 1: find or create thread
+    // attempt to find an existing thread between me + other_id (+ same request_id if provided)
+
+    // get all my threads that match this request_id (or all, if request_id null)
+    const matchFilters: Record<string, string | null> = request_id
+      ? { request_id }
+      : {};
+
+    const { data: candidateThreads, error: candErr } = await supabase
+      .from("message_threads")
+      .select("*")
+      .match(matchFilters)
+      .or(`user_a.eq.${selfId},user_b.eq.${selfId}`);
+
+    if (candErr) {
+      return NextResponse.json(
+        { ok: false, error: candErr.message },
+        { status: 400 }
+      );
+    }
+
+    let threadId: string | null = null;
+    if (candidateThreads && candidateThreads.length > 0) {
+      for (const t of candidateThreads as Array<{
+        id: string;
+        user_a: string;
+        user_b: string;
+      }>) {
+        const matchPair =
+          (t.user_a === selfId && t.user_b === other_id) ||
+          (t.user_a === other_id && t.user_b === selfId);
+        if (matchPair) {
+          threadId = t.id;
+          break;
+        }
+      }
+    }
+
+    // if no thread yet, create one
+    if (!threadId) {
+      const { data: newThread, error: newThreadErr } = await supabase
+        .from("message_threads")
+        .insert({
+          user_a: selfId,
+          user_b: other_id,
+          request_id: request_id ?? null,
+        })
+        .select("id")
+        .single();
+
+      if (newThreadErr || !newThread) {
+        return NextResponse.json(
+          { ok: false, error: newThreadErr?.message || "Cannot create thread" },
+          { status: 400 }
+        );
+      }
+      threadId = newThread.id;
+    }
+
+    // STEP 2: insert the message
+    const { data: inserted, error: insErr } = await supabase
+      .from("messages")
+      .insert({
+        thread_id: threadId,
+        sender_id: selfId,
+        body: body ?? null,
+        file_url: file_url ?? null,
+      })
+      .select("id")
+      .single();
+
+    if (insErr || !inserted) {
+      return NextResponse.json(
+        { ok: false, error: insErr?.message || "Insert failed" },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      message_id: inserted.id,
+    });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: errString(e) },
+      { status: 500 }
+    );
+  }
+}
