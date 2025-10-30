@@ -1,147 +1,152 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import RequireAuth from "../components/RequireAuth";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "../supabase/client";
 
-type ActiveRole = "couple" | "wedflexer" | null;
+const LOCATIONS = [
+  "Atlanta, Georgia",
+  "Charlotte, North Carolina",
+  "Dallas, Texas",
+  "Kansas City, Missouri",
+  "Chicago, Illinois",
+  "Washington D.C.",
+  "New York City, New York"
+];
 
 export default function FeedPage() {
-  const [data, setData] = useState<any[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [active, setActive] = useState<ActiveRole>(null);
-  const [postingId, setPostingId] = useState<string | null>(null);
-  const [applyMsg, setApplyMsg] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Filters
+  const [category, setCategory] = useState("");
+  const [location, setLocation] = useState("");
+  const [date, setDate] = useState("");
 
   useEffect(() => {
-    let cancelled = false;
-
     (async () => {
       try {
+        setLoading(true);
         const sb = supabaseBrowser();
 
-        // load active role
-        const { data: user } = await sb.auth.getUser();
-        if (user.user?.id) {
-          const { data: p } = await sb
-            .from("profiles")
-            .select("active_role")
-            .eq("id", user.user.id)
-            .single();
-          setActive((p?.active_role as ActiveRole) ?? null);
-        }
+        let query = sb.from("service_requests")
+          .select("id, title, category, location, service_date, description, status, min_price_cents")
+          .eq("status", "open");
 
-        // token for API
-        const { data: sess } = await sb.auth.getSession();
-        const token = sess.session?.access_token;
+        // Apply filters if set
+        if (category) query = query.ilike("category", `%${category}%`);
+        if (location) query = query.eq("location", location);
+        if (date) query = query.eq("service_date", date);
 
-        const res = await fetch("/api/open-requests", {
-          cache: "no-store",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        const json = await res.json();
+        const { data, error } = await query.order("created_at", { ascending: false });
 
-        if (!res.ok || !json?.ok) {
-          if (!cancelled) setError(json?.error || `HTTP ${res.status}`);
-        } else {
-          if (!cancelled) setData(json.data || []);
-        }
-      } catch (e: any) {
-        if (!cancelled) setError(String(e?.message || e));
+        if (error) throw error;
+        setRequests(data || []);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function applyTo(request_id: string) {
-    try {
-      setPostingId(request_id);
-      const sb = supabaseBrowser();
-      const { data: sess } = await sb.auth.getSession();
-      const token = sess.session?.access_token;
-
-      const res = await fetch("/api/applications", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ request_id, message: applyMsg, bid_cents: null }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) {
-        alert(json?.error || `HTTP ${res.status}`);
-      } else {
-        alert("Applied!");
-        setApplyMsg("");
-      }
-    } finally {
-      setPostingId(null);
-    }
-  }
+  }, [category, location, date]); // re-run when filters change
 
   return (
-    <RequireAuth>
-      <main className="max-w-3xl mx-auto p-6">
-        <h1 className="text-2xl font-semibold mb-4">Browse Offers</h1>
+    <main className="max-w-6xl mx-auto p-6 space-y-6">
+      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-purple-700">Browse Wedding Offers</h1>
+          <p className="text-sm opacity-70">Find wedding gigs that match your skills and location.</p>
+        </div>
+      </header>
 
-        {loading && <p>Loading…</p>}
-        {!loading && error && <p className="text-red-600">Error: {error}</p>}
-        {!loading && !error && data.length === 0 && (
-          <p>No offers available yet. Check back soon!</p>
-        )}
+      {/* Filters */}
+      <div className="flex flex-wrap items-end gap-4 border-b pb-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-600">Category</label>
+          <input
+            type="text"
+            placeholder="e.g. Photographer"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="border rounded px-3 py-2 text-sm w-48"
+          />
+        </div>
 
-        <ul className="space-y-3">
-          {data.map((r: any) => (
-            <li key={r.id} className="border rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-medium">{r.title}</h2>
-                <span className="text-sm opacity-70">
-                  ${Math.round(r.offer_cents / 100).toLocaleString()}
-                </span>
-              </div>
-              <p className="text-sm opacity-80">
-                {r.category} • {r.location}
-              </p>
+        <div>
+          <label className="block text-sm font-medium text-slate-600">Location</label>
+          <select
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            className="border rounded px-3 py-2 text-sm w-56 bg-white"
+          >
+            <option value="">All Locations</option>
+            {LOCATIONS.map((loc) => (
+              <option key={loc} value={loc}>
+                {loc}
+              </option>
+            ))}
+          </select>
+        </div>
 
-              <div className="mt-3 flex items-center gap-2">
-                <Link
-                  href={`/r/${r.id}`}
-                  className="text-blue-600 text-sm inline-block"
-                >
-                  View
-                </Link>
+        <div>
+          <label className="block text-sm font-medium text-slate-600">Service Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="border rounded px-3 py-2 text-sm w-48"
+          />
+        </div>
 
-                {active === "wedflexer" && (
-                  <>
-                    <input
-                      className="border rounded px-2 py-1 text-sm flex-1"
-                      placeholder="Optional message to the couple"
-                      value={applyMsg}
-                      onChange={(e) => setApplyMsg(e.target.value)}
-                    />
-                    <button
-                      onClick={() => applyTo(r.id)}
-                      disabled={postingId === r.id}
-                      className="bg-black text-white text-sm rounded px-3 py-1 disabled:opacity-60"
-                    >
-                      {postingId === r.id ? "Applying…" : "Apply"}
-                    </button>
-                  </>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </main>
-    </RequireAuth>
+        <button
+          onClick={() => {
+            setCategory("");
+            setLocation("");
+            setDate("");
+          }}
+          className="text-sm text-purple-700 hover:underline"
+        >
+          Clear Filters
+        </button>
+      </div>
+
+      {/* Results */}
+      {loading && <p>Loading offers...</p>}
+      {error && <p className="text-red-600">Error: {error}</p>}
+      {!loading && !error && requests.length === 0 && (
+        <p className="text-sm opacity-70">No offers match your filters.</p>
+      )}
+
+      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {requests.map((r) => (
+          <li key={r.id} className="border rounded-lg p-4 hover:shadow-md transition">
+            <h2 className="font-semibold text-lg">{r.title}</h2>
+            <p className="text-sm opacity-70 mb-2">{r.category || "Uncategorized"}</p>
+            <p className="text-sm">
+              📍 {r.location || "Location TBD"}
+              <br />
+              📅 {r.service_date ? new Date(r.service_date).toLocaleDateString() : "Flexible date"}
+            </p>
+
+            <p className="text-sm mt-2 line-clamp-2">{r.description}</p>
+
+            <div className="flex justify-between items-center mt-3">
+              <span className="font-semibold text-purple-700">
+                ${Math.round((r.min_price_cents || 0) / 100).toLocaleString()}
+              </span>
+
+              <Link
+                href={`/r/${r.id}`}
+                className="text-sm bg-purple-700 text-white rounded px-3 py-1 hover:bg-purple-800"
+              >
+                Apply
+              </Link>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </main>
   );
 }
