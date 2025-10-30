@@ -6,15 +6,12 @@ export default function MissionPage() {
       </h1>
 
       <p className="text-lg leading-relaxed text-slate-700 mb-8">
-        To put marriage and community back at the center of the wedding industry by empowering 
-        couples and creating opportunities for talented locals.
+        To make getting married affordable and simpler by empowering couples to get support from talented locals.
       </p>
 
       <div className="space-y-6 text-slate-800 text-base leading-relaxed">
         <p>
-          WedFlex is where couples post what they actually need — real tasks, real budgets —
-          and local creatives, friends, and side-hustlers can raise their hand and say
-          “I can do that.”
+          Our Core Values: Getting married should not cause financial stress. Center Marriage around a community first approach. Prioritize trust and safety with transparency and secure payments.
 
         </p>
 
@@ -23,10 +20,9 @@ export default function MissionPage() {
         </p>
 
         <p>
-          Anyone who has planned or been in a wedding knows the wedding industry is out of hand. The experience goes from excitement to sticker shock to reading contract fine print, and a whole lot of stress. WedFlex was born from a simple idea
-          If couples can name their price, and talented people in the community can meet their needs, we can change the entire structure of the
-          wedding industry. We are not just a marketplace to bring both sides together - we are a movement. A movement that brings the focus back
-          to support marriages and stregthening the community. WedFlex is a win-win. Join the movement today!
+          Anyone who has planned or been in a wedding knows the wedding industry is out of hand. The experience goes from excitement to sticker shock to reading contract fine print, and piling on a whole lot of stress. 
+          WedFlex was born from a simple idea:If couples can name their price, and talented people in the community can meet their needs, we can give power back to couples and support marriages in a way the
+          wedding industry has forgotten. WedFlex is for Marriage and Community. Join the movement today!
         </p>
       </div>
 
@@ -35,7 +31,7 @@ export default function MissionPage() {
           href="/post-offer"
           className="bg-purple-700 text-white text-sm font-medium px-5 py-3 rounded-md hover:bg-purple-800"
         >
-          I’m planning a wedding →
+          I am planning a wedding →
         </a>
         <a
           href="/feed"

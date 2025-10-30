@@ -1,13 +1,15 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { headers } from "next/headers";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { NextResponse, NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { headers } from "next/headers";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-function errString(e: unknown): string {
-  if (!e) return "Unknown error";
-  if (typeof e === "string") return e;
+/**
+ * helpers
+ */
+function errStr(e: unknown): string {
   if (e instanceof Error) return e.message;
   try {
     return JSON.stringify(e);
@@ -16,222 +18,185 @@ function errString(e: unknown): string {
   }
 }
 
+// GET /api/messages?other=<uuid>&request=<request_id?>
+// returns the thread + messages between me and "other" for (optional) request_id
 export async function GET(req: NextRequest) {
   try {
-    // auth from bearer
     const hdrs = await headers();
     const authHeader = hdrs.get("authorization") ?? "";
+
+    // create supabase instance with user token (RLS)
     const supabase = createClient(url, anon, {
       global: { headers: { Authorization: authHeader } },
     });
 
     // who am I
-    const { data: me, error: meErr } = await supabase.auth.getUser();
-    if (meErr || !me?.user) {
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !userRes?.user) {
       return NextResponse.json(
         { ok: false, error: "Not authenticated" },
         { status: 401 }
       );
     }
+    const myId = userRes.user.id;
 
-    const selfId = me.user.id;
-
-    // parse query params
     const { searchParams } = new URL(req.url);
-    const otherId = searchParams.get("other");
-    const reqId = searchParams.get("request"); // may be null
+    const otherUserId = searchParams.get("other");
+    const requestId = searchParams.get("request");
 
-    if (!otherId) {
+    if (!otherUserId) {
       return NextResponse.json(
         { ok: false, error: "Missing other user id" },
         { status: 400 }
       );
     }
 
-        const matchFilters: Record<string, string | null> = reqId
-      ? { request_id: reqId }
-      : {};
+    // normalize pair so (A,B) and (B,A) match same row
+    const [u1, u2] =
+      myId < otherUserId ? [myId, otherUserId] : [otherUserId, myId];
 
-    // We'll query all candidate threads involving me.
-    // We'll filter in JS for "other participant matches otherId".
-    const { data: threadRows, error: threadErr } = await supabase
+    // find thread
+    const { data: threadRow, error: threadErr } = await supabase
       .from("message_threads")
-      .select("*")
-      .match(matchFilters)
-      .or(
-        // supabase-js .or() uses PostgREST `or=(...)`
-        // We consider both participant slots.
-        `user_a.eq.${selfId},user_b.eq.${selfId}`
-      );
+      .select("id")
+      .eq("user_one", u1)
+      .eq("user_two", u2)
+      .eq("request_id", requestId || null)
+      .single();
 
-    if (threadErr) {
-      return NextResponse.json(
-        { ok: false, error: threadErr.message },
-        { status: 400 }
-      );
-    }
-
-    // Pick the thread where the OTHER participant is the provided otherId
-    let threadId: string | null = null;
-    if (threadRows && threadRows.length > 0) {
-      for (const t of threadRows) {
-        // we expect columns: id, user_a, user_b, request_id
-        const { id, user_a, user_b } = t as {
-          id: string;
-          user_a: string;
-          user_b: string;
-        };
-        const matchPair =
-          (user_a === selfId && user_b === otherId) ||
-          (user_a === otherId && user_b === selfId);
-        if (matchPair) {
-          threadId = id;
-          break;
-        }
-      }
-    }
-
-    if (!threadId) {
-      // no thread yet = no messages
+    if (threadErr || !threadRow) {
+      // no thread yet → return empty array
       return NextResponse.json({ ok: true, messages: [] });
     }
 
-    // Step 2: fetch messages in that thread
+    // load messages for that thread
     const { data: msgs, error: msgErr } = await supabase
       .from("messages")
       .select("id,sender_id,body,file_url,created_at")
-      .eq("thread_id", threadId)
+      .eq("thread_id", threadRow.id)
       .order("created_at", { ascending: true });
 
-    if (msgErr) {
-      return NextResponse.json(
-        { ok: false, error: msgErr.message },
-        { status: 400 }
-      );
-    }
+    if (msgErr) throw msgErr;
 
     return NextResponse.json({ ok: true, messages: msgs ?? [] });
   } catch (e) {
     return NextResponse.json(
-      { ok: false, error: errString(e) },
+      { ok: false, error: errStr(e) },
       { status: 500 }
     );
   }
 }
-// ✅ POST (the sender creates/uses a thread, then inserts a message)
+
+// POST /api/messages
+// body: { other: <uuid>, request_id?: <uuid|null>, text: <string>, file_url?: <string> }
 export async function POST(req: NextRequest) {
   try {
     const hdrs = await headers();
     const authHeader = hdrs.get("authorization") ?? "";
+
+    // supabase with RLS identity
     const supabase = createClient(url, anon, {
       global: { headers: { Authorization: authHeader } },
     });
 
-    // who am I
-    const { data: me, error: meErr } = await supabase.auth.getUser();
-    if (meErr || !me?.user) {
+    // me
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !userRes?.user) {
       return NextResponse.json(
         { ok: false, error: "Not authenticated" },
         { status: 401 }
       );
     }
-    const selfId = me.user.id;
+    const myId = userRes.user.id;
 
-    // body from client
-    const { other_id, request_id, body, file_url } = await req.json();
+    const bodyJson = await req.json();
+    const otherUserId = bodyJson.other;
+    const requestId = bodyJson.request_id ?? null;
+    const text = bodyJson.text ?? "";
+    const fileUrl = bodyJson.file_url ?? null;
 
-    if (!other_id || (typeof other_id !== "string")) {
+    if (!otherUserId) {
       return NextResponse.json(
-        { ok: false, error: "Missing other_id" },
+        { ok: false, error: "Missing other user id" },
+        { status: 400 }
+      );
+    }
+    if (!text && !fileUrl) {
+      return NextResponse.json(
+        { ok: false, error: "Message empty" },
         { status: 400 }
       );
     }
 
-    // STEP 1: find or create thread
-    // attempt to find an existing thread between me + other_id (+ same request_id if provided)
+    // normalize the pair
+    const [u1, u2] =
+      myId < otherUserId ? [myId, otherUserId] : [otherUserId, myId];
 
-    // get all my threads that match this request_id (or all, if request_id null)
-    const matchFilters: Record<string, string | null> = request_id
-      ? { request_id }
-      : {};
-
-    const { data: candidateThreads, error: candErr } = await supabase
+    // 1. try to find existing thread
+    const { data: threadRow, error: findErr } = await supabase
       .from("message_threads")
-      .select("*")
-      .match(matchFilters)
-      .or(`user_a.eq.${selfId},user_b.eq.${selfId}`);
-
-    if (candErr) {
-      return NextResponse.json(
-        { ok: false, error: candErr.message },
-        { status: 400 }
-      );
-    }
+      .select("id")
+      .eq("user_one", u1)
+      .eq("user_two", u2)
+      .eq("request_id", requestId || null)
+      .single();
 
     let threadId: string | null = null;
-    if (candidateThreads && candidateThreads.length > 0) {
-      for (const t of candidateThreads as Array<{
-        id: string;
-        user_a: string;
-        user_b: string;
-      }>) {
-        const matchPair =
-          (t.user_a === selfId && t.user_b === other_id) ||
-          (t.user_a === other_id && t.user_b === selfId);
-        if (matchPair) {
-          threadId = t.id;
-          break;
-        }
-      }
-    }
 
-    // if no thread yet, create one
-    if (!threadId) {
-      const { data: newThread, error: newThreadErr } = await supabase
+    if (!findErr && threadRow) {
+      threadId = threadRow.id;
+    } else {
+      // 2. create new thread
+      const { data: newThread, error: insertErr } = await supabase
         .from("message_threads")
         .insert({
-          user_a: selfId,
-          user_b: other_id,
-          request_id: request_id ?? null,
+          user_one: u1,
+          user_two: u2,
+          request_id: requestId || null,
+          last_message_at: new Date().toISOString(),
         })
         .select("id")
         .single();
 
-      if (newThreadErr || !newThread) {
+      if (insertErr || !newThread) {
         return NextResponse.json(
-          { ok: false, error: newThreadErr?.message || "Cannot create thread" },
+          { ok: false, error: errStr(insertErr) },
           { status: 400 }
         );
       }
+
       threadId = newThread.id;
     }
 
-    // STEP 2: insert the message
-    const { data: inserted, error: insErr } = await supabase
+    // 3. insert message
+    const { data: newMsg, error: msgErr } = await supabase
       .from("messages")
       .insert({
         thread_id: threadId,
-        sender_id: selfId,
-        body: body ?? null,
-        file_url: file_url ?? null,
+        sender_id: myId,
+        body: text,
+        file_url: fileUrl,
       })
-      .select("id")
+      .select("id,sender_id,body,file_url,created_at")
       .single();
 
-    if (insErr || !inserted) {
+    if (msgErr || !newMsg) {
       return NextResponse.json(
-        { ok: false, error: insErr?.message || "Insert failed" },
+        { ok: false, error: errStr(msgErr) },
         { status: 400 }
       );
     }
 
-    return NextResponse.json({
-      ok: true,
-      message_id: inserted.id,
-    });
+    // 4. bump thread last_message_at
+    await supabase
+      .from("message_threads")
+      .update({ last_message_at: new Date().toISOString() })
+      .eq("id", threadId);
+
+    return NextResponse.json({ ok: true, message: newMsg });
   } catch (e) {
     return NextResponse.json(
-      { ok: false, error: errString(e) },
+      { ok: false, error: errStr(e) },
       { status: 500 }
     );
   }
