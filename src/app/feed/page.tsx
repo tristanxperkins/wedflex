@@ -1,110 +1,154 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "../supabase/client";
+import { CATEGORY_OPTIONS, CITY_OPTIONS } from "../lib/constants";
 
-const LOCATIONS = [
-  "Atlanta, Georgia",
-  "Charlotte, North Carolina",
-  "Dallas, Texas",
-  "Kansas City, Missouri",
-  "Chicago, Illinois",
-  "Washington D.C.",
-  "New York City, New York"
-];
+type RequestRow = {
+  id: string;
+  title: string;
+  category: string | null;
+  location: string | null;
+  service_date: string | null;
+  created_at: string;
+  offer_cents: number | null;
+};
+
+function toErrorString(x: unknown): string {
+  if (!x) return "Unknown error";
+  if (typeof x === "string") return x;
+  if (x instanceof Error) return x.message;
+  try { return JSON.stringify(x); } catch { return String(x); }
+}
 
 export default function FeedPage() {
-  const [requests, setRequests] = useState<any[]>([]);
+  const [requests, setRequests] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  // Filters
-  const [category, setCategory] = useState("");
-  const [location, setLocation] = useState("");
-  const [date, setDate] = useState("");
+  // filters
+  const [category, setCategory] = useState<string>("");
+  const [location, setLocation] = useState<string>("");
+
+  // sort controls
+  const [sortField, setSortField] = useState<"service_date" | "created_at">("created_at");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
+        setErr(null);
         const sb = supabaseBrowser();
 
-        let query = sb.from("service_requests")
-          .select("id, title, category, location, service_date, description, status, min_price_cents")
+        let q = sb
+          .from("service_requests")
+          .select(
+            "id, title, category, location, service_date, created_at, offer_cents"
+          )
           .eq("status", "open");
 
-        // Apply filters if set
-        if (category) query = query.ilike("category", `%${category}%`);
-        if (location) query = query.eq("location", location);
-        if (date) query = query.eq("service_date", date);
+        if (category) q = q.eq("category", category);
+        if (location) q = q.eq("location", location);
 
-        const { data, error } = await query.order("created_at", { ascending: false });
+        // dynamic sort
+        q = q.order(sortField, { ascending: sortOrder === "asc", nullsFirst: false });
 
+        const { data, error } = await q;
         if (error) throw error;
-        setRequests(data || []);
+        setRequests(data ?? []);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setErr(toErrorString(e));
       } finally {
         setLoading(false);
       }
     })();
-  }, [category, location, date]); // re-run when filters change
+  }, [category, location, sortField, sortOrder]);
 
   return (
     <main className="max-w-6xl mx-auto p-6 space-y-6">
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-purple-700">Browse Wedding Offers</h1>
-          <p className="text-sm opacity-70">Find wedding gigs that match your skills and location.</p>
+          <p className="text-sm opacity-70">Filter and sort offers by category, city, and date.</p>
         </div>
       </header>
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-4 border-b pb-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-600">Category</label>
-          <input
-            type="text"
-            placeholder="e.g. Photographer"
+        <label className="block">
+          <div className="text-sm font-medium text-slate-600">Category</div>
+          <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="border rounded px-3 py-2 text-sm w-48"
-          />
-        </div>
+            className="border rounded px-3 py-2 text-sm w-56 bg-white"
+          >
+            <option value="">All Categories</option>
+            {CATEGORY_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </label>
 
-        <div>
-          <label className="block text-sm font-medium text-slate-600">Location</label>
+        <label className="block">
+          <div className="text-sm font-medium text-slate-600">Location</div>
           <select
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             className="border rounded px-3 py-2 text-sm w-56 bg-white"
           >
             <option value="">All Locations</option>
-            {LOCATIONS.map((loc) => (
-              <option key={loc} value={loc}>
-                {loc}
+            {CITY_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
               </option>
             ))}
           </select>
-        </div>
+        </label>
 
-        <div>
-          <label className="block text-sm font-medium text-slate-600">Service Date</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="border rounded px-3 py-2 text-sm w-48"
-          />
-        </div>
+        {/* Sort Controls */}
+        <label className="block">
+          <div className="text-sm font-medium text-slate-600">Sort By</div>
+          <select
+            value={sortField}
+            onChange={(e) => setSortField(e.target.value as "service_date" | "created_at")}
+            className="border rounded px-3 py-2 text-sm bg-white"
+          >
+            <option value="created_at">Date Posted</option>
+            <option value="service_date">Service Date</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="text-sm font-medium text-slate-600">Order</div>
+          <select
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as "asc" | "desc")}
+            className="border rounded px-3 py-2 text-sm bg-white"
+          >
+            {sortField === "service_date" ? (
+              <>
+                <option value="asc">Soonest First</option>
+                <option value="desc">Furthest First</option>
+              </>
+            ) : (
+              <>
+                <option value="desc">Newest First</option>
+                <option value="asc">Oldest First</option>
+              </>
+            )}
+          </select>
+        </label>
 
         <button
           onClick={() => {
             setCategory("");
             setLocation("");
-            setDate("");
+            setSortField("created_at");
+            setSortOrder("desc");
           }}
           className="text-sm text-purple-700 hover:underline"
         >
@@ -112,10 +156,11 @@ export default function FeedPage() {
         </button>
       </div>
 
-      {/* Results */}
-      {loading && <p>Loading offers...</p>}
-      {error && <p className="text-red-600">Error: {error}</p>}
-      {!loading && !error && requests.length === 0 && (
+      {/* Content */}
+      {loading && <p>Loading…</p>}
+      {err && <p className="text-red-600 break-all">Error: {err}</p>}
+
+      {!loading && !err && requests.length === 0 && (
         <p className="text-sm opacity-70">No offers match your filters.</p>
       )}
 
@@ -127,16 +172,16 @@ export default function FeedPage() {
             <p className="text-sm">
               📍 {r.location || "Location TBD"}
               <br />
-              📅 {r.service_date ? new Date(r.service_date).toLocaleDateString() : "Flexible date"}
+              📅{" "}
+              {r.service_date
+                ? new Date(r.service_date).toLocaleDateString()
+                : "Flexible date"}
             </p>
-
-            <p className="text-sm mt-2 line-clamp-2">{r.description}</p>
 
             <div className="flex justify-between items-center mt-3">
               <span className="font-semibold text-purple-700">
-                ${Math.round((r.min_price_cents || 0) / 100).toLocaleString()}
+                ${Math.round((r.offer_cents ?? 0) / 100).toLocaleString()}
               </span>
-
               <Link
                 href={`/r/${r.id}`}
                 className="text-sm bg-purple-700 text-white rounded px-3 py-1 hover:bg-purple-800"

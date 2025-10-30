@@ -3,20 +3,23 @@
 import { useEffect, useState } from "react";
 import RequireAuth from "../components/RequireAuth";
 import { supabaseBrowser } from "../supabase/client";
+import { CATEGORY_OPTIONS, CITY_OPTIONS } from "../lib/constants";
 
 type Role = "couple" | "wedflexer" | null;
 
 export default function PostOfferPage() {
   const [role, setRole] = useState<Role>(null);
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("");
-  const [location, setLocation] = useState("");
+  const [category, setCategory] = useState<string>("");
+  const [location, setLocation] = useState<string>("");
+  const [serviceDate, setServiceDate] = useState<string>("");
+  const [description, setDescription] = useState("");
   const [offer, setOffer] = useState<string>(""); // dollars (we’ll convert to cents)
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
-  useEffect(() => {
+   useEffect(() => {
     (async () => {
       const sb = supabaseBrowser();
       const { data: me } = await sb.auth.getUser();
@@ -86,7 +89,7 @@ export default function PostOfferPage() {
 
         {role !== "couple" && (
           <p className="text-sm mb-4 text-amber-700">
-            You’re currently <strong>{role ?? "unset"}</strong>. Switch to <strong>Couple</strong> on the Setup Role page to post.
+            You are currently <strong>{role ?? "unset"}</strong>. Switch to <strong>Couple</strong> on the Setup Role page to post.
           </p>
         )}
 
@@ -98,31 +101,35 @@ export default function PostOfferPage() {
               className="w-full border rounded px-3 py-2"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Day-of Coordinator for June 14"
+              placeholder="e.g., Pink, Green, and White Floral Arch"
             />
           </div>
 
-          <div>
-            <label className="block text-sm mb-1">Category</label>
-            <input
-              required
-              className="w-full border rounded px-3 py-2"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="Coordinator, Photographer, DJ…"
-            />
-          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block">
+          <div className="text-sm mb-1">Category *</div>
+          <select
+            className="w-full border rounded px-3 py-2 bg-white"
+            value={category}
+            onChange={(e)=>setCategory(e.target.value)}
+          >
+            <option value="">Select category</option>
+            {CATEGORY_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+        </label>
 
-          <div>
-            <label className="block text-sm mb-1">Location</label>
-            <input
-              required
-              className="w-full border rounded px-3 py-2"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="City, State"
-            />
-          </div>
+        <label className="block">
+          <div className="text-sm mb-1">Location *</div>
+          <select
+            className="w-full border rounded px-3 py-2 bg-white"
+            value={location}
+            onChange={(e)=>setLocation(e.target.value)}
+          >
+            <option value="">Select city</option>
+            {CITY_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+        </label>
+      </div>
 
           <div>
             <label className="block text-sm mb-1">Offer (USD)</label>
@@ -136,7 +143,7 @@ export default function PostOfferPage() {
               placeholder="500"
             />
             <p className="text-xs opacity-70 mt-1">
-              Optional. Leave blank if you want WedFlexers to bid.
+              Optional. Leave blank if you want WedFlexers to submit a bid.
             </p>
           </div>
 
