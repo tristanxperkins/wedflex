@@ -7,6 +7,14 @@ import { createClient } from "@supabase/supabase-js";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+type PostBody = {
+  request_id: string;
+  message?: string | null;
+  accept_offer?: boolean;
+  counter_offer?: number | string | null;
+  file_urls?: string[] | null;
+};
+
 export async function POST(req: NextRequest) {
   try {
     const hdrs = await headers();
@@ -15,13 +23,12 @@ export async function POST(req: NextRequest) {
       global: { headers: { Authorization: auth } },
     });
 
-    // Expecting from client:
-    // { request_id: string, message: string, accept_offer?: boolean, counter_offer?: number | string | null }
-    const body = await req.json();
-    const request_id: string = body.request_id;
-    const message: string = (body.message ?? "").toString().trim();
-    const accept_offer: boolean = Boolean(body.accept_offer);
-    const counter_offer = body.counter_offer; // may be number|string|null
+    const body = (await req.json()) as PostBody;
+    const request_id = String(body.request_id || "").trim();
+    const message = (body.message ?? "").toString().trim();
+    const accept_offer = Boolean(body.accept_offer);
+    const counter_offer_raw = body.counter_offer;
+    const file_urls = Array.isArray(body.file_urls) ? body.file_urls : null;
 
     if (!request_id) {
       return NextResponse.json({ ok: false, error: "Missing request_id" }, { status: 400 });
@@ -53,7 +60,6 @@ export async function POST(req: NextRequest) {
     // Decide bid_cents
     let bid_cents: number | null = null;
     if (accept_offer) {
-      // Accept the posted offer; if no posted offer, require counter
       if (typeof reqRow.offer_cents === "number" && Number.isFinite(reqRow.offer_cents)) {
         bid_cents = Math.max(0, Math.floor(reqRow.offer_cents));
       } else {
@@ -63,14 +69,19 @@ export async function POST(req: NextRequest) {
         );
       }
     } else {
-      // Counter offer path
-      if (counter_offer === null || typeof counter_offer === "undefined" || String(counter_offer).trim() === "") {
-        bid_cents = null; // treat as “message only” bid if you want; or enforce value:
-        // return NextResponse.json({ ok: false, error: "Please enter your counter-offer" }, { status: 400 });
+      if (
+        counter_offer_raw === null ||
+        typeof counter_offer_raw === "undefined" ||
+        String(counter_offer_raw).trim() === ""
+      ) {
+        bid_cents = null; // allowed (message-only)
       } else {
-        const parsed = Number(counter_offer);
+        const parsed = Number(counter_offer_raw);
         if (!Number.isFinite(parsed) || parsed < 0) {
-          return NextResponse.json({ ok: false, error: "Counter-offer must be a non-negative number" }, { status: 400 });
+          return NextResponse.json(
+            { ok: false, error: "Counter-offer must be a non-negative number" },
+            { status: 400 }
+          );
         }
         bid_cents = Math.floor(parsed * 100);
       }
@@ -80,7 +91,8 @@ export async function POST(req: NextRequest) {
       request_id,
       wedflexer_id: me.user.id,
       message,
-      bid_cents,           // may be null
+      bid_cents,                       // may be null
+      file_urls: file_urls ?? null,    // NEW
       status: "pending" as const,
     };
 
@@ -93,12 +105,19 @@ export async function POST(req: NextRequest) {
     if (error) throw error;
 
     return NextResponse.json({ ok: true, id: app.id });
-} catch (e: unknown) {
-  const msg =
-    e instanceof Error ? e.message : (() => { try { return JSON.stringify(e); } catch { return String(e); } })();
-  return NextResponse.json({ ok: false, error: msg }, { status: 500 });
-}
-
+  } catch (e: unknown) {
+    const msg =
+      e instanceof Error
+        ? e.message
+        : (() => {
+            try {
+              return JSON.stringify(e);
+            } catch {
+              return String(e);
+            }
+          })();
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+  }
 }
 
 export async function GET(_req: NextRequest) {
