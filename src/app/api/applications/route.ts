@@ -91,8 +91,8 @@ export async function POST(req: NextRequest) {
       request_id,
       wedflexer_id: me.user.id,
       message,
-      bid_cents,                       // may be null
-      file_urls: file_urls ?? null,    // NEW
+      bid_cents,                       
+      file_urls: file_urls ?? null,    
       status: "pending" as const,
     };
 

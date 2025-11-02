@@ -33,7 +33,7 @@ type RequestRow = {
 type CoupleProfile = {
   id: string;
   avatar_url: string | null;
-  couple_display_names: string | null; // e.g., "Alex & Jamie"
+  couple_display_name: string | null; // e.g., "Alex & Jamie"
   wedding_style: string | null;
   our_story: string | null;
   wedding_date: string | null; // ISO
@@ -120,7 +120,7 @@ export default function RequestDetailPage() {
         // couple snippet
         const { data: cp, error: cErr } = await sb
           .from("profiles")
-          .select("id, avatar_url, couple_display_names, our_story, wedding_style, wedding_date, inspiration_urls")
+          .select("id, avatar_url, couple_display_name, our_story, wedding_style, wedding_date, inspiration_urls")
           .eq("id", request.couple_id)
           .single();
         if (cErr) throw cErr;
@@ -234,7 +234,7 @@ const parsed = json as apiresponse;
                     />
                     <div>
                       <div className="font-medium">
-                        {couple.couple_display_names || "Wedding Couple"}
+                        {couple.couple_display_name || "Wedding Couple"}
                       </div>
                       {couple.wedding_date && (
                         <div className="text-xs opacity-70">
