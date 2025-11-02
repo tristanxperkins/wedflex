@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { supabaseBrowser } from "../supabase/client";
 
 type ActiveRole = "couple" | "wedflexer" | null;
@@ -12,6 +12,9 @@ function cx(...a: (string | false | null | undefined)[]) {
 }
 
 export default function Nav() {
+  const router = useRouter();
+  const pathname = usePathname();
+
   const [email, setEmail] = useState<string | null>(null);
   const [role, setRole] = useState<ActiveRole>(null);
   const [hasCouple, setHasCouple] = useState(false);
@@ -19,14 +22,13 @@ export default function Nav() {
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  const pathname = usePathname();
-
-  // Load auth, role, and role-capabilities
+  // ---------- Load auth + role state ----------
   useEffect(() => {
     (async () => {
       try {
         const sb = supabaseBrowser();
 
+        // who am I?
         const { data: userData, error: userErr } = await sb.auth.getUser();
         if (userErr) throw userErr;
 
@@ -41,26 +43,22 @@ export default function Nav() {
         const u = userData.user;
         setEmail(u.email ?? "");
 
-        // current active role
-        const { data: prof, error: profErr } = await sb
+        // current active role on profile (nullable)
+        const { data: prof, error: pErr } = await sb
           .from("profiles")
           .select("active_role")
           .eq("id", u.id)
           .single();
-
-        // PGRST116 = not found; ignore that and treat as null role
-        if (profErr && (profErr as { code?: string }).code !== "PGRST116") {
-          throw profErr;
-        }
+        // PGRST116 means no row; treat as null
+        if (pErr && (pErr as { code?: string }).code !== "PGRST116") throw pErr;
         setRole((prof?.active_role as ActiveRole) ?? null);
 
-        // infer possession of each role from activity
+        // infer if the account *has* each role
         const [{ count: coupleCnt, error: cErr }, { count: wedCnt, error: wErr }] =
           await Promise.all([
             sb.from("service_requests").select("id", { count: "exact", head: true }).eq("couple_id", u.id),
             sb.from("applications").select("id", { count: "exact", head: true }).eq("wedflexer_id", u.id),
           ]);
-
         if (cErr) throw cErr;
         if (wErr) throw wErr;
 
@@ -74,29 +72,49 @@ export default function Nav() {
     })();
   }, [pathname]);
 
+  // ---------- Derived helpers ----------
+  const isSignedIn = !!email;
+  const bothRoles = hasCouple && hasWedflexer;
+
+  const dashboardHref = useMemo<string | null>(() => {
+    if (!isSignedIn) return null;
+    // Prefer explicit active_role; otherwise infer from what they "have".
+    const effective: ActiveRole =
+      role ?? (hasCouple ? "couple" : hasWedflexer ? "wedflexer" : null);
+    if (effective === "couple") return "/dashboard/couple";
+    if (effective === "wedflexer") return "/dashboard/wedflexer";
+    return null;
+  }, [isSignedIn, role, hasCouple, hasWedflexer]);
+
+  // Always keeps the Dashboard link in sync with the current toggle/role.
+  function goDashboard() {
+    if (!dashboardHref) return;
+    router.push(dashboardHref);
+  }
+
+  // ---------- Toggle logic (sets role + routes) ----------
   async function switchRole(next: "couple" | "wedflexer") {
     try {
       const sb = supabaseBrowser();
 
-      // auth status
-      const { data: userData } = await sb.auth.getUser();
-      if (!userData?.user) {
-        // not signed in → send to the correct funnel
-        window.location.href = next === "couple" ? "/post-your-first-offer" : "/earn-money";
+      // If not signed in → send them into the correct funnel
+      const { data: me } = await sb.auth.getUser();
+      if (!me?.user) {
+        router.push(next === "couple" ? "/post-your-first-offer" : "/earn-money");
         return;
       }
 
-      // if they don't "have" that role yet, go to onboarding for it
+      // Signed in but doesn't *have* that role yet → onboarding/funnel
       if (next === "couple" && !hasCouple) {
-        window.location.href = "/post-your-first-offer";
+        router.push("/post-your-first-offer");
         return;
       }
       if (next === "wedflexer" && !hasWedflexer) {
-        window.location.href = "/earn-money";
+        router.push("/earn-money");
         return;
       }
 
-      // persist active_role with a valid bearer under RLS
+      // Persist active_role using a proper bearer for RLS
       const { data: sess } = await sb.auth.getSession();
       const token = sess.session?.access_token;
 
@@ -108,47 +126,31 @@ export default function Nav() {
         },
         body: JSON.stringify({ active_role: next }),
       });
-
       const json = await res.json();
       if (!res.ok || !json?.ok) throw new Error(json?.error || `HTTP ${res.status}`);
 
-      setRole(next);
-      // refresh so pages like /r/[id] re-evaluate role and show the proper UI (Apply panel)
-      window.location.reload();
-    } catch (e) {
-      // fallback → funnel for that role
-      window.location.href = next === "couple" ? "/post-your-first-offer" : "/earn-money";
+      setRole(next);            // update toggle immediately
+      router.push(next === "couple" ? "/dashboard/couple" : "/dashboard/wedflexer"); // and route to the matching dashboard
+    } catch {
+      // On any failure, route into the correct funnel for a smoother experience
+      router.push(next === "couple" ? "/post-your-first-offer" : "/earn-money");
     }
   }
 
-  const isSignedIn = !!email;
-  const bothRoles = hasCouple && hasWedflexer;
-
+  // ---------- Link groups ----------
   function GuestLinks() {
     return (
       <>
         <Link href="/" className={cx("hover:text-purple-700", pathname === "/" && "font-semibold text-purple-700")}>
           Home
         </Link>
-        <Link
-          href="/mission"
-          className={cx("hover:text-purple-700", pathname === "/mission" && "font-semibold text-purple-700")}
-        >
+        <Link href="/mission" className={cx("hover:text-purple-700", pathname === "/mission" && "font-semibold text-purple-700")}>
           Mission
         </Link>
-        <Link
-          href="/post-your-first-offer"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/post-your-first-offer" && "font-semibold text-purple-700"
-          )}
-        >
+        <Link href="/post-your-first-offer" className={cx("hover:text-purple-700", pathname === "/post-your-first-offer" && "font-semibold text-purple-700")}>
           Post your first offer
         </Link>
-        <Link
-          href="/earn-money"
-          className={cx("hover:text-purple-700", pathname === "/earn-money" && "font-semibold text-purple-700")}
-        >
+        <Link href="/earn-money" className={cx("hover:text-purple-700", pathname === "/earn-money" && "font-semibold text-purple-700")}>
           Earn money
         </Link>
       </>
@@ -161,24 +163,15 @@ export default function Nav() {
         <Link href="/" className={cx("hover:text-purple-700", pathname === "/" && "font-semibold text-purple-700")}>
           Home
         </Link>
-        <Link
-          href="/mission"
-          className={cx("hover:text-purple-700", pathname === "/mission" && "font-semibold text-purple-700")}
-        >
+        <Link href="/mission" className={cx("hover:text-purple-700", pathname === "/mission" && "font-semibold text-purple-700")}>
           Mission
         </Link>
-        <Link
-          href="/post-offer"
-          className={cx("hover:text-purple-700", pathname === "/post-offer" && "font-semibold text-purple-700")}
-        >
+        <Link href="/post-offer" className={cx("hover:text-purple-700", pathname === "/post-offer" && "font-semibold text-purple-700")}>
           Post Offer
         </Link>
         <button
-          onClick={() => switchRole("couple")}
-          className={cx(
-            "hover:text-purple-700",
-            pathname?.startsWith("/dashboard/couple") && "font-semibold text-purple-700"
-          )}
+          onClick={goDashboard}
+          className={cx("hover:text-purple-700", pathname?.startsWith("/dashboard/couple") && "font-semibold text-purple-700")}
         >
           Dashboard
         </button>
@@ -192,21 +185,15 @@ export default function Nav() {
         <Link href="/" className={cx("hover:text-purple-700", pathname === "/" && "font-semibold text-purple-700")}>
           Home
         </Link>
-        <Link
-          href="/mission"
-          className={cx("hover:text-purple-700", pathname === "/mission" && "font-semibold text-purple-700")}
-        >
+        <Link href="/mission" className={cx("hover:text-purple-700", pathname === "/mission" && "font-semibold text-purple-700")}>
           Mission
         </Link>
         <Link href="/feed" className={cx("hover:text-purple-700", pathname === "/feed" && "font-semibold text-purple-700")}>
           Browse Offers
         </Link>
         <button
-          onClick={() => switchRole("wedflexer")}
-          className={cx(
-            "hover:text-purple-700",
-            pathname?.startsWith("/dashboard/wedflexer") && "font-semibold text-purple-700"
-          )}
+          onClick={goDashboard}
+          className={cx("hover:text-purple-700", pathname?.startsWith("/dashboard/wedflexer") && "font-semibold text-purple-700")}
         >
           Dashboard
         </button>
@@ -220,23 +207,17 @@ export default function Nav() {
         <Link href="/" className={cx("hover:text-purple-700", pathname === "/" && "font-semibold text-purple-700")}>
           Home
         </Link>
-        <Link
-          href="/mission"
-          className={cx("hover:text-purple-700", pathname === "/mission" && "font-semibold text-purple-700")}
-        >
+        <Link href="/mission" className={cx("hover:text-purple-700", pathname === "/mission" && "font-semibold text-purple-700")}>
           Mission
         </Link>
         <Link href="/feed" className={cx("hover:text-purple-700", pathname === "/feed" && "font-semibold text-purple-700")}>
           Browse Offers
         </Link>
-        <Link
-          href="/post-offer"
-          className={cx("hover:text-purple-700", pathname === "/post-offer" && "font-semibold text-purple-700")}
-        >
+        <Link href="/post-offer" className={cx("hover:text-purple-700", pathname === "/post-offer" && "font-semibold text-purple-700")}>
           Post Offer
         </Link>
         <button
-          onClick={() => switchRole(role === "wedflexer" ? "wedflexer" : "couple")}
+          onClick={goDashboard}
           className={cx("hover:text-purple-700", pathname?.startsWith("/dashboard") && "font-semibold text-purple-700")}
         >
           Dashboard
@@ -286,6 +267,7 @@ export default function Nav() {
               {email}
             </span>
 
+            {/* Toggle appears only if the account has both roles */}
             {bothRoles ? (
               <div className="bg-slate-100 border rounded-full flex text-xs">
                 <button
@@ -324,6 +306,7 @@ export default function Nav() {
                 </button>
               </div>
             ) : (
+              // Signed in but neither role inferred yet → show paths
               <div className="flex items-center gap-2 text-xs">
                 <button
                   onClick={() => switchRole("couple")}
@@ -343,12 +326,8 @@ export default function Nav() {
         )}
       </div>
 
-      {/* Debug helper (optional)
-      {loadErr && (
-        <div className="text-[10px] text-red-600 max-w-xs break-words">
-          Nav error: {loadErr}
-        </div>
-      )} */}
+      {/* Optional tiny error for debugging */}
+      {/* {loadErr && <div className="text-[10px] text-red-600 max-w-xs break-words">Nav error: {loadErr}</div>} */}
     </nav>
   );
 }
