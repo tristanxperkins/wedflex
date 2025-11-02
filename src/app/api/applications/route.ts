@@ -26,12 +26,20 @@ export async function POST(req: NextRequest) {
       global: { headers: { Authorization: auth } },
     });
 
-    const body = (await req.json()) as Partial<PostBody>;
-    const request_id = String(body.request_id ?? "").trim();
-    const message = String(body.message ?? "").trim();
+    type Body = {
+      request_id: string;
+      message: string;
+      accept_offer?: boolean;
+      counter_offer?: number | string | null;
+      file_urls?: string[] | null;
+    };
+
+    const body = (await req.json()) as Body;
+    const request_id = String(body.request_id || "");
+    const message = String(body.message || "").trim();
     const accept_offer = Boolean(body.accept_offer);
     const counter_offer = body.counter_offer;
-    const file_urls = (Array.isArray(body.file_urls) ? body.file_urls : null) ?? null;
+    const file_urls = Array.isArray(body.file_urls) ? body.file_urls : null;
 
     if (!request_id) {
       return NextResponse.json({ ok: false, error: "Missing request_id" }, { status: 400 });
@@ -70,7 +78,7 @@ export async function POST(req: NextRequest) {
       }
     } else {
       if (counter_offer == null || String(counter_offer).trim() === "") {
-        bid_cents = null; // message-only application is allowed
+        bid_cents = null;
       } else {
         const parsed = Number(counter_offer);
         if (!Number.isFinite(parsed) || parsed < 0) {
@@ -80,30 +88,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const insert = {
-      request_id,
-      wedflexer_id: me.user.id,
-      message,
-      bid_cents,
-      file_urls,                 // requires a TEXT[] or JSONB column as discussed
-      status: "pending" as const,
-    };
-
     const { data: app, error } = await supabase
       .from("applications")
-      .insert(insert)
+      .insert({
+        request_id,
+        wedflexer_id: me.user.id,
+        message,
+        bid_cents,
+        file_urls, // 👈 will be null or string[]
+        status: "pending",
+      })
       .select("id")
       .single();
 
-    if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
-    }
-
+    if (error) throw error;
     return NextResponse.json({ ok: true, id: app.id });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: toErr(e) }, { status: 500 });
+    const msg = e instanceof Error ? e.message : (() => { try { return JSON.stringify(e); } catch { return String(e); } })();
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
+
 
 type AppListRow = {
   id: string;

@@ -70,6 +70,10 @@ export default function RequestDetailPage() {
   const [files, setFiles] = useState<string[]>([]);
   const [posting, setPosting] = useState(false);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<string[]>([]);
+const [uploading, setUploading] = useState(false);
+const [uploadErr, setUploadErr] = useState<string | null>(null);
+
 
   const offerAmount = useMemo(
     () => (reqRow?.offer_cents != null
@@ -197,6 +201,45 @@ const parsed = json as apiresponse;
       setPosting(false);
     }
   }
+
+  async function handleFilesSelected(files: FileList | null) {
+  if (!files || files.length === 0) return;
+  try {
+    setUploading(true);
+    setUploadErr(null);
+
+    const sb = supabaseBrowser();
+    const { data: me } = await sb.auth.getUser();
+    if (!me?.user) throw new Error("Not authenticated");
+
+    const uid = me.user.id;
+
+    const uploaded: string[] = [];
+    for (const file of Array.from(files)) {
+      // Unique key per user
+      const key = `${uid}/${Date.now()}-${encodeURIComponent(file.name)}`;
+      const up = await sb.storage.from("application_files").upload(key, file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+      if (up.error) throw up.error;
+
+      const pub = sb.storage.from("application_files").getPublicUrl(key);
+      if (!pub?.data?.publicUrl) throw new Error("Could not get public URL");
+      uploaded.push(pub.data.publicUrl);
+    }
+
+    setAttachments((prev) => [...uploaded, ...prev]);
+  } catch (e) {
+    setUploadErr(e instanceof Error ? e.message : String(e));
+  } finally {
+    setUploading(false);
+  }
+}
+
+function removeAttachment(url: string) {
+  setAttachments((prev) => prev.filter((u) => u !== url));
+}
 
   return (
     <RequireAuth>
@@ -408,6 +451,43 @@ const parsed = json as apiresponse;
     <ul className="mt-2 space-y-1 text-xs break-all">
       {files.map((u) => (
         <li key={u} className="text-purple-700 underline">{u}</li>
+      ))}
+    </ul>
+  )}
+</div>
+{/* Attachments (optional) */}
+<div className="mt-4">
+  <label className="block text-sm font-medium mb-2">Attachments (optional)</label>
+
+  <div className="flex items-center gap-2">
+    <label className="inline-flex items-center px-3 py-2 border rounded cursor-pointer text-sm">
+      <input
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => handleFilesSelected(e.target.files)}
+        accept="image/*,application/pdf"
+      />
+      {uploading ? "Uploading…" : "Add files"}
+    </label>
+    {uploadErr && <span className="text-xs text-red-600">{uploadErr}</span>}
+  </div>
+
+  {attachments.length > 0 && (
+    <ul className="mt-3 space-y-2 text-sm">
+      {attachments.map((u) => (
+        <li key={u} className="flex items-center justify-between gap-2">
+          <a href={u} target="_blank" rel="noreferrer" className="underline break-all">
+            {u}
+          </a>
+          <button
+            type="button"
+            onClick={() => removeAttachment(u)}
+            className="text-xs text-red-700 hover:underline"
+          >
+            remove
+          </button>
+        </li>
       ))}
     </ul>
   )}
