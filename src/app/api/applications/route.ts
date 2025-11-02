@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-
 import { NextResponse, type NextRequest } from "next/server";
 import { headers } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
@@ -7,9 +5,14 @@ import { createClient } from "@supabase/supabase-js";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+function toErr(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  try { return JSON.stringify(e); } catch { return String(e); }
+}
+
 type PostBody = {
   request_id: string;
-  message?: string | null;
+  message: string;
   accept_offer?: boolean;
   counter_offer?: number | string | null;
   file_urls?: string[] | null;
@@ -23,12 +26,12 @@ export async function POST(req: NextRequest) {
       global: { headers: { Authorization: auth } },
     });
 
-    const body = (await req.json()) as PostBody;
-    const request_id = String(body.request_id || "").trim();
-    const message = (body.message ?? "").toString().trim();
+    const body = (await req.json()) as Partial<PostBody>;
+    const request_id = String(body.request_id ?? "").trim();
+    const message = String(body.message ?? "").trim();
     const accept_offer = Boolean(body.accept_offer);
-    const counter_offer_raw = body.counter_offer;
-    const file_urls = Array.isArray(body.file_urls) ? body.file_urls : null;
+    const counter_offer = body.counter_offer;
+    const file_urls = (Array.isArray(body.file_urls) ? body.file_urls : null) ?? null;
 
     if (!request_id) {
       return NextResponse.json({ ok: false, error: "Missing request_id" }, { status: 400 });
@@ -37,13 +40,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Please add a message" }, { status: 400 });
     }
 
-    // who am I?
     const { data: me, error: meErr } = await supabase.auth.getUser();
     if (meErr || !me?.user) {
       return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
     }
 
-    // get the request to know the posted offer
     const { data: reqRow, error: rErr } = await supabase
       .from("service_requests")
       .select("id, couple_id, offer_cents, status")
@@ -57,7 +58,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "This offer is not open" }, { status: 400 });
     }
 
-    // Decide bid_cents
     let bid_cents: number | null = null;
     if (accept_offer) {
       if (typeof reqRow.offer_cents === "number" && Number.isFinite(reqRow.offer_cents)) {
@@ -69,19 +69,12 @@ export async function POST(req: NextRequest) {
         );
       }
     } else {
-      if (
-        counter_offer_raw === null ||
-        typeof counter_offer_raw === "undefined" ||
-        String(counter_offer_raw).trim() === ""
-      ) {
-        bid_cents = null; // allowed (message-only)
+      if (counter_offer == null || String(counter_offer).trim() === "") {
+        bid_cents = null; // message-only application is allowed
       } else {
-        const parsed = Number(counter_offer_raw);
+        const parsed = Number(counter_offer);
         if (!Number.isFinite(parsed) || parsed < 0) {
-          return NextResponse.json(
-            { ok: false, error: "Counter-offer must be a non-negative number" },
-            { status: 400 }
-          );
+          return NextResponse.json({ ok: false, error: "Counter-offer must be a non-negative number" }, { status: 400 });
         }
         bid_cents = Math.floor(parsed * 100);
       }
@@ -91,8 +84,8 @@ export async function POST(req: NextRequest) {
       request_id,
       wedflexer_id: me.user.id,
       message,
-      bid_cents,                       
-      file_urls: file_urls ?? null,    
+      bid_cents,
+      file_urls,                 // requires a TEXT[] or JSONB column as discussed
       status: "pending" as const,
     };
 
@@ -102,23 +95,24 @@ export async function POST(req: NextRequest) {
       .select("id")
       .single();
 
-    if (error) throw error;
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
 
     return NextResponse.json({ ok: true, id: app.id });
-  } catch (e: unknown) {
-    const msg =
-      e instanceof Error
-        ? e.message
-        : (() => {
-            try {
-              return JSON.stringify(e);
-            } catch {
-              return String(e);
-            }
-          })();
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: toErr(e) }, { status: 500 });
   }
 }
+
+type AppListRow = {
+  id: string;
+  request_id: string;
+  message: string | null;
+  bid_cents: number | null;
+  status: "pending" | "accepted" | "rejected" | "withdrawn" | null;
+  created_at: string;
+};
 
 export async function GET(_req: NextRequest) {
   try {
@@ -139,10 +133,12 @@ export async function GET(_req: NextRequest) {
       .eq("wedflexer_id", me.user.id)
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
-    return NextResponse.json({ ok: true, data });
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ ok: true, data: (data ?? []) as AppListRow[] });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    return NextResponse.json({ ok: false, error: toErr(e) }, { status: 500 });
   }
 }

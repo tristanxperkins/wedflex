@@ -5,13 +5,21 @@ import { createClient } from "@supabase/supabase-js";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+function toErr(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  try { return JSON.stringify(e); } catch { return String(e); }
+}
+
+interface Params {
+  id: string;
+}
+
 export async function PATCH(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  ctx: { params: Promise<Params> }
 ) {
   try {
-    // Next 15: await params + headers()
-    const { id } = await context.params;
+    const { id } = await ctx.params;
     const hdrs = await headers();
     const auth = hdrs.get("authorization") ?? "";
 
@@ -19,18 +27,19 @@ export async function PATCH(
       global: { headers: { Authorization: auth } },
     });
 
-    const { status } = await req.json();
-    const allowed = new Set(["pending", "accepted", "rejected", "withdrawn"]);
-    if (!allowed.has(String(status))) {
-      return NextResponse.json({ ok: false, error: "Invalid status" }, { status: 400 });
+    const body: { status?: string } = await req.json().catch(() => ({}));
+    const nextStatus = (body.status ?? "").trim().toLowerCase();
+
+    const allowed = ["pending", "accepted", "rejected", "withdrawn"] as const;
+    if (!allowed.includes(nextStatus as (typeof allowed)[number])) {
+      return NextResponse.json({ ok: false, error: "Invalid status value" }, { status: 400 });
     }
 
-    // RLS will ensure only the couple who owns the request can update
     const { data, error } = await supabase
       .from("applications")
-      .update({ status })
+      .update({ status: nextStatus })
       .eq("id", id)
-      .select("id, status")
+      .select("id, request_id, status, updated_at")
       .single();
 
     if (error) {
@@ -39,8 +48,6 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true, data });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    return NextResponse.json({ ok: false, error: toErr(e) }, { status: 500 });
   }
 }
-
