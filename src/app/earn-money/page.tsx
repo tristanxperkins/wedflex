@@ -18,6 +18,8 @@ export default function EarnMoneyPage() {
   const [agreed, setAgreed] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [stripeErr, setStripeErr] = useState<string | null>(null);
 
   // Read step from the URL on the client (no useSearchParams)
   useEffect(() => {
@@ -52,20 +54,51 @@ export default function EarnMoneyPage() {
     url.searchParams.set("step", String(next));
     router.replace(url.pathname + url.search);
   }
+  async function startStripeConnect() {
+    try {
+      setStripeLoading(true);
+      setStripeErr(null);
+
+      const sb = supabaseBrowser();
+      const { data: sess } = await sb.auth.getSession();
+      const token = sess.session?.access_token;
+
+      const res = await fetch("/api/stripe/connect-link", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json?.ok || !json.url) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+
+      // go to Stripe-hosted onboarding / dashboard
+      window.location.href = json.url as string;
+    } catch (e) {
+      setStripeErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStripeLoading(false);
+    }
+  }
 
   return (
     <main className="max-w-4xl mx-auto px-4 py-8 space-y-8">
       {/* Hero / intro */}
       <header className="space-y-2">
         <p className="text-xs font-semibold tracking-[0.2em] text-purple-600 uppercase">
-          Earn money with WedFlex
+          How to become a wedFlexer
         </p>
         <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900">
-          Turn your everyday talents into wedding income.
+          Who are WedFlexers?
         </h1>
         <p className="text-slate-600 max-w-2xl">
           Be the local hero behind someone&apos;s best day. WedFlex connects real couples
-          with real people – not traditional vendors – for creative, flexible wedding work.
+          with real people, not traditional vendors, for creative, flexible wedding work.
+          Control what you earn and on your own time.
         </p>
       </header>
 
@@ -73,8 +106,8 @@ export default function EarnMoneyPage() {
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-slate-900">Who are WedFlexers?</h2>
         <p className="text-slate-600 max-w-2xl">
-          WedFlexers are talented locals – not traditional wedding vendors. They&apos;re
-          college students, hobbyists, side-hustlers, and neighbors using their skills to
+          WedFlexers are talented locals not traditional wedding vendors. WedFlexers are
+          neighbors, college students, hobbyists, and side-hustlers using their skills to
           help couples get married without the high markup of traditional vendors.
         </p>
 
@@ -104,10 +137,10 @@ export default function EarnMoneyPage() {
       <section className="space-y-3">
         <h2 className="text-xl font-semibold text-slate-900">How WedFlex work works</h2>
         <ol className="list-decimal list-inside space-y-1 text-slate-600 text-sm">
-          <li>Create your WedFlexer profile and tell couples what you offer.</li>
-          <li>Browse wedding offers in your city and apply to the ones that fit.</li>
-          <li>If a couple books you, they pay through WedFlex and funds are held safely.</li>
-          <li>You show up, do great work, and get paid after the event – minus a small fee.</li>
+          <li>Create your WedFlexer profile and a Stripe account to get paid directly.</li>
+          <li>Browse wedding offers in your city, apply, and chat with couples to confirm details.</li>
+          <li>Get booked and track your bookings on your WedFlexer dashboard.</li>
+          <li>Deliver the service and get paid the same day, minus a small platform fee.</li>
         </ol>
       </section>
 
@@ -119,7 +152,7 @@ export default function EarnMoneyPage() {
               Step {step} of 3
             </p>
             <h2 className="text-lg md:text-xl font-semibold text-slate-900">
-              {step === 1 && "Agree to WedFlex terms"}
+              {step === 1 && "Agree to WedFlex terms and conditions"}
               {step === 2 && "Create your WedFlex account"}
               {step === 3 && "Connect payouts & complete profile"}
             </h2>
@@ -147,20 +180,19 @@ export default function EarnMoneyPage() {
             </p>
 
             <div className="border rounded-xl p-3 bg-slate-50 text-xs text-slate-700 space-y-1 max-h-40 overflow-y-auto">
-              <p>Key highlights (non-exhaustive):</p>
               <ul className="list-disc list-inside space-y-1">
-                <li>You are an independent contractor, not an employee of WedFlex.</li>
+                <li>You are an independent contractor, not an employee of WedFlex. As such, you are responsible for maintaining any required licenses relevant for your county or state (for example, officiants must be legally ordained).</li>
                 <li>
-                  You agree to show up on time, perform the work you&apos;ve agreed to, and
+                  You agree to show up on time, perform the work you agreed to, and
                   communicate clearly with couples.
                 </li>
                 <li>
                   Payments are processed through WedFlex and Stripe; payouts are sent to your
-                  connected bank account after the event.
+                  connected bank account, minus a small service fee, on the day of the service, after the service is complete.
                 </li>
                 <li>
                   You agree to our community standards, including professionalism, respect, and
-                  non-discrimination.
+                  delivering quality.
                 </li>
               </ul>
             </div>
@@ -220,8 +252,8 @@ export default function EarnMoneyPage() {
             ) : (
               <div className="space-y-3">
                 <p className="text-sm text-slate-700">
-                  Use your email to sign in or create a WedFlex account. When you&apos;re
-                  done, we&apos;ll bring you back here to finish setup.
+                  Use your email to sign in or create a WedFlex account. When you are
+                  done, we will bring you back here to finish setup.
                 </p>
                 <Link
                   href="/auth/signin?role=wedflexer&next=/earn-money?step=3"
@@ -239,22 +271,26 @@ export default function EarnMoneyPage() {
           <div className="mt-4 space-y-4">
             <p className="text-sm text-slate-700">
               Last step: connect payouts (via Stripe) and complete your WedFlexer profile.
-              This is where you&apos;ll tell couples what you offer and how you work.
             </p>
 
             <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
               <li>Securely connect your bank account through Stripe Express.</li>
-              <li>Add your skills, services, city, and a short bio.</li>
-              <li>Upload a profile photo and portfolio samples, if you have them.</li>
+              <li>Add you a short bio, highlighting why you became a WedFlexer and your skills, and select the services you want to provide.</li>
+              <li>Upload a profile photo and add pictures of your work to your portfolio, if you have them. (If you do not have any that is okay, you can add them after your first WedFlex wedding!)</li>
             </ul>
 
             <div className="flex flex-wrap gap-3">
-              <Link
-                href="/api/stripe/connect-link"
-                className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium bg-purple-700 text-white hover:bg-purple-800"
-              >
-                Connect payouts (Stripe)
-              </Link>
+              <button
+  type="button"
+  onClick={startStripeConnect}
+  disabled={stripeLoading}
+  className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium bg-purple-700 text-white hover:bg-purple-800 disabled:opacity-60"
+>
+  {stripeLoading ? "Connecting…" : "Connect payouts with Stripe"}
+</button>
+{stripeErr && (
+  <p className="text-xs text-red-600 mt-2">Stripe error: {stripeErr}</p>
+)}
               <Link
                 href="/dashboard/wedflexer/profile"
                 className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium border border-purple-700 text-purple-700 hover:bg-purple-50"
@@ -264,8 +300,8 @@ export default function EarnMoneyPage() {
             </div>
 
             <p className="text-xs text-slate-500">
-              Once you&apos;ve connected payouts and finished your profile, you&apos;ll be
-              ready to browse offers and start applying. 🎉
+              Once you have connected payouts and finished your profile, you will be
+              ready to browse offers and start earning money on WedFlex! 🎉
             </p>
           </div>
         )}
