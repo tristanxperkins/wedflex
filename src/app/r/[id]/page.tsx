@@ -62,6 +62,8 @@ export default function RequestDetailPage() {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+const [bookingForApp, setBookingForApp] = useState<string | null>(null);
+const [bookingErr, setBookingErr] = useState<string | null>(null);
 
   // Apply form
   const [applyMsg, setApplyMsg] = useState("");

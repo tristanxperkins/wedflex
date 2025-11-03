@@ -2,102 +2,274 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabaseBrowser } from "../supabase/client";
+
+type Step = 1 | 2 | 3;
+
+function cx(...a: (string | false | null | undefined)[]) {
+  return a.filter(Boolean).join(" ");
+}
 
 export default function EarnMoneyPage() {
   const router = useRouter();
-  const [signedIn, setSignedIn] = useState(false);
-  const [checking, setChecking] = useState(true);
 
+  const [step, setStep] = useState<Step>(1);
+  const [agreed, setAgreed] = useState(false);
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Read step from the URL on the client (no useSearchParams)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("step");
+    const n = raw ? Number(raw) : 1;
+    if (n === 2) setStep(2);
+    else if (n === 3) setStep(3);
+    else setStep(1);
+  }, []);
+
+  // Check if user is already signed in
   useEffect(() => {
     (async () => {
-      const sb = supabaseBrowser();
-      const { data } = await sb.auth.getUser();
-      setSignedIn(!!data?.user);
-      setChecking(false);
+      try {
+        const sb = supabaseBrowser();
+        const { data } = await sb.auth.getUser();
+        setIsAuthed(!!data?.user);
+      } catch {
+        // ignore
+      } finally {
+        setCheckingAuth(false);
+      }
     })();
   }, []);
 
-  function handleContinue() {
-    if (signedIn) {
-      // eventually: if profile incomplete, keep them on profile first
-      router.push("/dashboard/wedflexer/profile");
-    } else {
-      router.push("/auth/signin?role=wedflexer");
-    }
+  function updateStep(next: Step) {
+    setStep(next);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("step", String(next));
+    router.replace(url.pathname + url.search);
   }
 
   return (
-    <main className="max-w-3xl mx-auto px-6 py-16 text-slate-900">
-      <div className="mb-8">
-        <p className="text-xs font-medium text-purple-700 tracking-wide uppercase">
-          Step 1 of 3
+    <main className="max-w-4xl mx-auto px-4 py-8 space-y-8">
+      {/* Hero / intro */}
+      <header className="space-y-2">
+        <p className="text-xs font-semibold tracking-[0.2em] text-purple-600 uppercase">
+          Earn money with WedFlex
         </p>
-        <h1 className="text-3xl font-bold text-slate-900 mt-2">
-          Earn money off of weddings with your talent
+        <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900">
+          Turn your everyday talents into wedding income.
         </h1>
-        <p className="text-slate-700 text-base leading-relaxed mt-4">
-          WedFlexers are talented locals - not traditional wedding vendors. All you need is a skill and a passion to help people get married. 
-          WedFlexers are everyday people with skills they are not already monetizing such as: having the best playlist, having an eye for design, 
-          being a great DIY-er, or being a type-A organizer. You can make money with your talents on WedFlex, starting right now!
+        <p className="text-slate-600 max-w-2xl">
+          Be the local hero behind someone&apos;s best day. WedFlex connects real couples
+          with real people – not traditional vendors – for creative, flexible wedding work.
         </p>
-      </div>
+      </header>
 
-      {/* step breakdown */}
-      <section className="space-y-6 text-sm leading-relaxed text-slate-800">
-        <div className="border rounded-lg p-4">
-          <h2 className="font-semibold text-slate-900 mb-1">
-            Create your WedFlexer profile
-          </h2>
-          <p>
-            Click the link in your email to activate your WedFlexer account. Magic links are how you will login to your WedFlex account each time. 
-            Go to your WedFlexer Dashboard to complete your profile to tell us about yourself and what services you can offer. 
-            Tip: Adding a few photos or examples of what you can do helps couples see your amazing talent before they book you. 
-          </p>
+      {/* Who are WedFlexers? */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-slate-900">Who are WedFlexers?</h2>
+        <p className="text-slate-600 max-w-2xl">
+          WedFlexers are talented locals – not traditional wedding vendors. They&apos;re
+          college students, hobbyists, side-hustlers, and neighbors using their skills to
+          help couples get married without the high markup of traditional vendors.
+        </p>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            "People with a passion for photography",
+            "Friends known for the best playlists",
+            "Locals with an eye for floral design",
+            "Home cooks who love feeding people",
+            "Confident public speakers and MCs",
+            "Hosts with a great backyard or space",
+            "Type-A organizers and day-of helpers",
+            "DIY crafters and décor geniuses",
+          ].map((label) => (
+            <div
+              key={label}
+              className="border rounded-2xl px-3 py-4 bg-slate-50 flex items-start gap-2 text-sm"
+            >
+              <span className="mt-1 inline-block h-2 w-2 rounded-full bg-purple-500" />
+              <span>{label}</span>
+            </div>
+          ))}
         </div>
-
-        <div className="border rounded-lg p-4">
-          <h2 className="font-semibold text-slate-900 mb-1">
-            Browse offers near you
-          </h2>
-          <p>
-            Browse offers from couples in your community for services they are looking for help with. Couples post offers for all types of wedding services from setup/teardown,
-            florals and decor, bartending (license may be required), officiating (license required), photography, planning, DIY builds — all of it. 
-            Accept the offer or counteroffer and apply in one click. 
-          </p>
-        </div>
-
-        <div className="border rounded-lg p-4">
-          <h2 className="font-semibold text-slate-900 mb-1">
-            Get booked and paid
-          </h2>
-          <p>
-            Chat with the couple to confirm details and, if you are the best fit for them, the couple books you directly in the WedFlex app. 
-            What you will earn is tracked in your Dashboard and as soon as the job is done, you get paid! Make your own schedule and accept offers that work for you!
-            Tip: Always be professional in how you do business! Never double book yourself.
-          </p>
-        </div>
-
       </section>
 
+      {/* How it works summary */}
+      <section className="space-y-3">
+        <h2 className="text-xl font-semibold text-slate-900">How WedFlex work works</h2>
+        <ol className="list-decimal list-inside space-y-1 text-slate-600 text-sm">
+          <li>Create your WedFlexer profile and tell couples what you offer.</li>
+          <li>Browse wedding offers in your city and apply to the ones that fit.</li>
+          <li>If a couple books you, they pay through WedFlex and funds are held safely.</li>
+          <li>You show up, do great work, and get paid after the event – minus a small fee.</li>
+        </ol>
+      </section>
 
-      <div className="mt-10">
-        <button
-          disabled={checking}
-          onClick={handleContinue}
-          className="bg-purple-700 text-white text-sm font-medium px-5 py-3 rounded-md hover:bg-purple-800 disabled:opacity-50"
-        >
-          {checking
-            ? "Checking…"
-            : signedIn
-            ? "Start Your WedFlexer Profile"
-            : "Continue to Become a WedFlexer"}
-        </button>
+      {/* Step tracker + content */}
+      <section className="space-y-4 border rounded-2xl p-4 md:p-6 bg-white shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold text-purple-600 uppercase tracking-[0.2em]">
+              Step {step} of 3
+            </p>
+            <h2 className="text-lg md:text-xl font-semibold text-slate-900">
+              {step === 1 && "Agree to WedFlex terms"}
+              {step === 2 && "Create your WedFlex account"}
+              {step === 3 && "Connect payouts & complete profile"}
+            </h2>
+          </div>
 
-        <p className="text-xs text-slate-500 mt-3">
-          Click the button above to continute setting up your WedFlexer profile.
-        </p>
-      </div>
+          <div className="flex items-center gap-2 text-xs">
+            {[1, 2, 3].map((s) => (
+              <span
+                key={s}
+                className={cx(
+                  "h-2 w-6 rounded-full",
+                  step === s ? "bg-purple-600" : "bg-slate-200",
+                )}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* STEP 1 – terms */}
+        {step === 1 && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-slate-700">
+              Before you start earning, please review and agree to the WedFlex terms for
+              WedFlexers. These protect both you and the couples you work with.
+            </p>
+
+            <div className="border rounded-xl p-3 bg-slate-50 text-xs text-slate-700 space-y-1 max-h-40 overflow-y-auto">
+              <p>Key highlights (non-exhaustive):</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li>You are an independent contractor, not an employee of WedFlex.</li>
+                <li>
+                  You agree to show up on time, perform the work you&apos;ve agreed to, and
+                  communicate clearly with couples.
+                </li>
+                <li>
+                  Payments are processed through WedFlex and Stripe; payouts are sent to your
+                  connected bank account after the event.
+                </li>
+                <li>
+                  You agree to our community standards, including professionalism, respect, and
+                  non-discrimination.
+                </li>
+              </ul>
+            </div>
+
+            <label className="flex items-start gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+              />
+              <span>
+                I have read and agree to the WedFlex WedFlexer terms and conditions.
+              </span>
+            </label>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => updateStep(2)}
+                disabled={!agreed}
+                className={cx(
+                  "px-4 py-2 rounded-md text-sm font-medium",
+                  agreed
+                    ? "bg-purple-700 text-white hover:bg-purple-800"
+                    : "bg-slate-200 text-slate-500 cursor-not-allowed",
+                )}
+              >
+                Continue to Step 2
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 2 – sign in / create account */}
+        {step === 2 && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-slate-700">
+              Create or sign in to your WedFlex account so we can connect your applications,
+              bookings, and payouts.
+            </p>
+
+            {checkingAuth ? (
+              <p className="text-sm text-slate-500">Checking your account…</p>
+            ) : isAuthed ? (
+              <div className="space-y-3">
+                <p className="text-sm text-green-700">
+                  You&apos;re already signed in. Next we&apos;ll connect payouts and complete
+                  your WedFlexer profile.
+                </p>
+                <button
+                  onClick={() => updateStep(3)}
+                  className="px-4 py-2 rounded-md text-sm font-medium bg-purple-700 text-white hover:bg-purple-800"
+                >
+                  Continue to Step 3
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-700">
+                  Use your email to sign in or create a WedFlex account. When you&apos;re
+                  done, we&apos;ll bring you back here to finish setup.
+                </p>
+                <Link
+                  href="/auth/signin?role=wedflexer&next=/earn-money?step=3"
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium bg-purple-700 text-white hover:bg-purple-800"
+                >
+                  Sign in / Create account
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* STEP 3 – payouts + profile */}
+        {step === 3 && (
+          <div className="mt-4 space-y-4">
+            <p className="text-sm text-slate-700">
+              Last step: connect payouts (via Stripe) and complete your WedFlexer profile.
+              This is where you&apos;ll tell couples what you offer and how you work.
+            </p>
+
+            <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
+              <li>Securely connect your bank account through Stripe Express.</li>
+              <li>Add your skills, services, city, and a short bio.</li>
+              <li>Upload a profile photo and portfolio samples, if you have them.</li>
+            </ul>
+
+            <div className="flex flex-wrap gap-3">
+              <Link
+                href="/api/stripe/connect-link"
+                className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium bg-purple-700 text-white hover:bg-purple-800"
+              >
+                Connect payouts (Stripe)
+              </Link>
+              <Link
+                href="/dashboard/wedflexer/profile"
+                className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium border border-purple-700 text-purple-700 hover:bg-purple-50"
+              >
+                Complete WedFlexer profile
+              </Link>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Once you&apos;ve connected payouts and finished your profile, you&apos;ll be
+              ready to browse offers and start applying. 🎉
+            </p>
+          </div>
+        )}
+      </section>
     </main>
   );
 }
