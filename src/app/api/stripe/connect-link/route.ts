@@ -46,6 +46,11 @@ export async function POST(req: NextRequest) {
         capabilities: {
           card_payments: { requested: true },
           transfers: { requested: true },
+          },
+          business_profile: {
+            mcc: "7299",
+            product_description: "I provide wedding-related services to couples via WedFlex.",
+            url: "https://wedflex.com"
         },
         metadata: {
           supabase_user_id: user.id,
