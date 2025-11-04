@@ -1,60 +1,75 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "../../supabase/client";
 
-// Avoid prerendering; this page needs request-time URL params
-export const dynamic = "force-dynamic";
-
-function CallbackInner() {
+export default function AuthCallbackPage() {
   const router = useRouter();
-  const sp = useSearchParams();
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    const sb = supabaseBrowser();
-
     (async () => {
       try {
-        // Handle ?code=... (OAuth/code-style links)
-        const code = sp.get("code");
-        if (code) {
-          const { error } = await sb.auth.exchangeCodeForSession(code);
-          if (error) throw error;
+        const sb = supabaseBrowser();
+
+        // Make sure Supabase has an active session
+        const { data: sess, error: sErr } = await sb.auth.getSession();
+        if (sErr) throw sErr;
+        if (!sess.session) throw new Error("No active session");
+
+        // 1) Read `next` from the URL if present
+        let next: string | null = null;
+        if (typeof window !== "undefined") {
+          const url = new URL(window.location.href);
+          next = url.searchParams.get("next");
         }
 
-        // Magic link (#access_token) is auto-handled by the SDK on init
-        const { data } = await sb.auth.getSession();
-        if (data.session) {
-          const returnTo = sp.get("returnTo");
-          router.replace(returnTo || "/feed");
-          return;
-        }
+        // SPECIAL CASE: if next is "/dashboard", we'll decide based on role below
+        const wantsGenericDashboard = next === "/dashboard";
 
-        // Fallback: wait for session
-        const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
-          if (session) {
-            const returnTo = sp.get("returnTo");
-            router.replace(returnTo || "/feed");
+        // 2) If no next param (or it's just "/dashboard" or "/"), derive from role
+        if (!next || next === "/" || wantsGenericDashboard) {
+          const { data: me } = await sb.auth.getUser();
+          const uid = me?.user?.id;
+          let role: "couple" | "wedflexer" | null = null;
+
+          if (uid) {
+            const { data: prof } = await sb
+              .from("profiles")
+              .select("active_role")
+              .eq("id", uid)
+              .single();
+
+            role = (prof?.active_role as "couple" | "wedflexer" | null) ?? null;
           }
-        });
 
-        // cleanup after a few seconds
-        setTimeout(() => sub.subscription.unsubscribe(), 8000);
+          if (role === "wedflexer") {
+            next = "/dashboard/wedflexer";
+          } else if (role === "couple") {
+            next = "/dashboard/couple";
+          } else {
+            next = "/feed"; // fallback if no role yet
+          }
+        }
+
+        router.replace(next);
       } catch (e) {
-        console.error(e);
-        router.replace("/auth/signin?error=callback");
+        setErr(e instanceof Error ? e.message : String(e));
       }
     })();
-  }, [router, sp]);
+  }, [router]);
 
-  return <main className="p-6">Signing you in…</main>;
-}
-
-export default function AuthCallbackPage() {
   return (
-    <Suspense fallback={<main className="p-6">Signing you in…</main>}>
-      <CallbackInner />
-    </Suspense>
+    <main className="max-w-md mx-auto px-4 py-10 text-center">
+      <h1 className="text-xl font-semibold mb-2">Finishing sign-in…</h1>
+      {!err ? (
+        <p className="text-sm text-slate-600">
+          Please wait while we redirect you.
+        </p>
+      ) : (
+        <p className="text-sm text-red-600">Error: {err}</p>
+      )}
+    </main>
   );
 }
