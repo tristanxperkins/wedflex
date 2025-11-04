@@ -49,7 +49,7 @@ export default function AuthCallbackPage() {
           } else if (role === "couple") {
             next = "/dashboard/couple";
           } else {
-            next = "/feed"; // fallback if no role yet
+            next = "/earn-money?step=2"; // fallback if no role yet
           }
         }
 

@@ -256,7 +256,7 @@ export default function EarnMoneyPage() {
                   done, we will bring you back here to finish setup.
                 </p>
                 <Link
-                  href="/auth/signin?role=wedflexer&next=/earn-money?step=3"
+                  href="/auth/signin?role=wedflexer&next=/earn-money?step=2"
                   className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium bg-purple-700 text-white hover:bg-purple-800"
                 >
                   Sign in / Create account
