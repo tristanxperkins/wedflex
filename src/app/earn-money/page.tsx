@@ -274,7 +274,7 @@ export default function EarnMoneyPage() {
             </p>
 
             <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
-              <li>Securely connect your bank account through Stripe Express.</li>
+              <li>Securely connect your bank account through Stripe Connect.</li>
               <li>Add you a short bio, highlighting why you became a WedFlexer and your skills, and select the services you want to provide.</li>
               <li>Upload a profile photo and add pictures of your work to your portfolio, if you have them. (If you do not have any that is okay, you can add them after your first WedFlex wedding!)</li>
             </ul>

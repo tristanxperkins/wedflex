@@ -75,8 +75,8 @@ export async function POST(req: NextRequest) {
     const link = await stripe.accountLinks.create({
       account: accountId,
       type: "account_onboarding", // Express onboarding
-      refresh_url: `${origin}/earn-money?step=3&stripe=refresh`,
-      return_url: `${origin}/earn-money?step=3&stripe=return`,
+      refresh_url: `${origin}/earn-money?step=2`,
+      return_url: `${origin}/earn-money?step=3`,
     });
 
     return NextResponse.json({ ok: true, url: link.url });
