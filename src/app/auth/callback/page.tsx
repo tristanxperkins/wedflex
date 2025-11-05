@@ -4,6 +4,19 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "../../supabase/client";
 
+type ActiveRole = "couple" | "wedflexer" | null;
+
+function toErr(x: unknown): string {
+  if (!x) return "Unknown error";
+  if (typeof x === "string") return x;
+  if (x instanceof Error) return x.message;
+  try {
+    return JSON.stringify(x);
+  } catch {
+    return String(x);
+  }
+}
+
 export default function AuthCallbackPage() {
   const router = useRouter();
   const [err, setErr] = useState<string | null>(null);
@@ -13,62 +26,69 @@ export default function AuthCallbackPage() {
       try {
         const sb = supabaseBrowser();
 
-        // Make sure Supabase has an active session
-        const { data: sess, error: sErr } = await sb.auth.getSession();
-        if (sErr) throw sErr;
-        if (!sess.session) throw new Error("No active session");
+        // 1) Exchange the code in the URL for a Supabase session
+        const { data, error } = await sb.auth.exchangeCodeForSession(
+          window.location.href,
+        );
+        if (error) throw error;
 
-        // 1) Read `next` from the URL if present
-        let next: string | null = null;
-        if (typeof window !== "undefined") {
-          const url = new URL(window.location.href);
-          next = url.searchParams.get("next");
-        }
+        // 2) Parse query params from the current URL (no useSearchParams)
+        const url = new URL(window.location.href);
+        const roleParam = url.searchParams.get("role");
+        const next = url.searchParams.get("next") || undefined;
 
-        // SPECIAL CASE: if next is "/dashboard", we'll decide based on role below
-        const wantsGenericDashboard = next === "/dashboard";
+        let activeRole: ActiveRole = null;
+        if (roleParam === "couple" || roleParam === "wedflexer") {
+          activeRole = roleParam;
 
-        // 2) If no next param (or it's just "/dashboard" or "/"), derive from role
-        if (!next || next === "/" || wantsGenericDashboard) {
-          const { data: me } = await sb.auth.getUser();
-          const uid = me?.user?.id;
-          let role: "couple" | "wedflexer" | null = null;
+          // 3) Persist active_role in the profiles table via /api/me
+          const { data: sess } = await sb.auth.getSession();
+          const token = sess.session?.access_token;
 
-          if (uid) {
-            const { data: prof } = await sb
-              .from("profiles")
-              .select("active_role")
-              .eq("id", uid)
-              .single();
-
-            role = (prof?.active_role as "couple" | "wedflexer" | null) ?? null;
-          }
-
-          if (role === "wedflexer") {
-            next = "/dashboard/wedflexer";
-          } else if (role === "couple") {
-            next = "/dashboard/couple";
-          } else {
-            next = "/earn-money?step=2"; // fallback if no role yet
+          if (token) {
+            try {
+              const res = await fetch("/api/me", {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ active_role: activeRole }),
+              });
+              // ignore JSON format errors; best effort
+              await res.json().catch(() => undefined);
+            } catch {
+              // swallow; not fatal to auth
+            }
           }
         }
 
-        router.replace(next);
+        // 4) Decide where to send them
+        if (next) {
+          router.replace(next);
+        } else if (activeRole === "couple") {
+          router.replace("/dashboard/couple");
+        } else if (activeRole === "wedflexer") {
+          router.replace("/dashboard/wedflexer");
+        } else {
+          // generic login → default to couple dashboard
+          router.replace("/dashboard/couple");
+        }
       } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        setErr(toErr(e));
       }
     })();
   }, [router]);
 
   return (
-    <main className="max-w-md mx-auto px-4 py-10 text-center">
-      <h1 className="text-xl font-semibold mb-2">Finishing sign-in…</h1>
-      {!err ? (
-        <p className="text-sm text-slate-600">
-          Please wait while we redirect you.
-        </p>
+    <main className="max-w-md mx-auto px-4 py-12">
+      <h1 className="text-lg font-semibold mb-2">Signing you in…</h1>
+      {err ? (
+        <p className="text-sm text-red-600 break-words">Error: {err}</p>
       ) : (
-        <p className="text-sm text-red-600">Error: {err}</p>
+        <p className="text-sm text-slate-600">
+          Please wait, we&apos;re finishing your sign-in and redirecting you.
+        </p>
       )}
     </main>
   );

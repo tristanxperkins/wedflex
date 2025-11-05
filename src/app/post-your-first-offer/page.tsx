@@ -18,27 +18,34 @@ export default function PostYourFirstOfferPage() {
     })();
   }, []);
 
-  function handleContinue() {
-    if (signedIn) {
-      // eventually: check if couple profile is set up; if not, send to /dashboard/couple/profile
-      router.push("/post-offer");
-    } else {
-      // not signed in yet; go sign in as couple
-      router.push("/auth/signin?role=couple");
+  async function handleContinue() {
+    const sb = supabaseBrowser ();
+    const {data} = await sb.auth.getUser();
+
+      if (!data?.user) {
+      router.push(
+        "/auth/signin?role=couple&next=/dashboard/couple/post-offer"
+      );
+      return;
     }
+
+    // If already signed in → just take them straight to post-offer flow
+    router.push("/dashboard/couple/post-offer");
   }
 
   return (
     <main className="max-w-3xl mx-auto px-6 py-16 text-slate-900">
       <div className="mb-8">
         <p className="text-xs font-medium text-purple-700 tracking-wide uppercase">
-          Step 1 of 3
+          How WedFlex works for Couples
         </p>
         <h1 className="text-3xl font-bold text-slate-900 mt-2">
-          Creating your Couple Account
+          First, Create your Couple Account
         </h1>
         <p className="text-slate-700 text-base leading-relaxed mt-4">
-          Create your free WedFlex Couple account to start posting Offers to talented locals in your community.  
+          Continue on this page and follow the magic link in your email to login. 
+          Magic links are how you will login to your WedFlex account each time. 
+          Update your profile with your story and wedding inspiration pictures. 
         </p>
       </div>
 
@@ -46,19 +53,24 @@ export default function PostYourFirstOfferPage() {
       <section className="space-y-6 text-sm leading-relaxed text-slate-800">
         <div className="border rounded-lg p-4">
           <h2 className="font-semibold text-slate-900 mb-1">
-            Create your account and profile
+          Second, Post your First Offer
           </h2>
           <p>
-          Click the link in your email to activate your Couple account. Magic links are how you will login to your WedFlex account each time. 
+          Posting an offer is the powerful way couples get to name their price for wedding services. 
+          Tell us what you need, set your offer price, and share your wedding details. 
+          Talented locals accept your offer and share their profile with you. 
+          Review WedFlexer profiles, chat to confirm details, and book to lock in the help you need for your wedding. 
+          You can relax knowing you are protected by WedFlex Escrow - WedFlexers only get paid when the job is done.
           </p>
         </div>
 
         <div className="border rounded-lg p-4">
           <h2 className="font-semibold text-slate-900 mb-1">
-            Post Your First Offer - Stress Free
+          Then, just keep WedFlexing
           </h2>
           <p>
-            Tell us what you need, set your offer price, and share your wedding details. Talented locals accept your offer (or make a counter-offer) and share their profile with you. Review WedFlexer profiles, chat to confirm details, and lock in the help you need for your wedding. You can relax knowing you are protected by WedFlex Escrow - WedFlexers only get paid when the job is done. 
+           Visit your dashboard to track your offers, budget, and more. 
+           After you wind down from the wedding, become a WedFlexer to make extra money on the side helping other couples get married.  
           </p>
         </div>
 
@@ -67,7 +79,8 @@ export default function PostYourFirstOfferPage() {
             Complete your Couple Profile
           </h2>
           <p>
-        Add your sweet love story, wedding details, and wedding inspo pics to your Dashboard. Manage your Dashboard to track your wedding budget and view messages with WedFlexers. 
+        Tell us your story, wedding details, and add your wedding inspo pics to your Dashboard. 
+        Manage your Dashboard to track your wedding budget and view applications and messages with WedFlexers. 
           </p>
         </div>
       </section>
@@ -82,7 +95,7 @@ export default function PostYourFirstOfferPage() {
             ? "Checking…"
             : signedIn
             ? "Start Posting an Offer"
-            : "Continue – Create Your Couple Profile"}
+            : "Create Your Couple Profile"}
         </button>
 
         <p className="text-xs text-slate-500 mt-3">
