@@ -21,12 +21,10 @@ export default function Nav() {
 
   const pathname = usePathname();
 
-  // Load auth, role, and role-capabilities
   useEffect(() => {
     (async () => {
       try {
         const sb = supabaseBrowser();
-
         const { data: userData, error: userErr } = await sb.auth.getUser();
         if (userErr) throw userErr;
 
@@ -48,7 +46,6 @@ export default function Nav() {
           .eq("id", u.id)
           .single();
 
-        // PGRST116 = not found; ignore that and treat as null role
         if (profErr && (profErr as { code?: string }).code !== "PGRST116") {
           throw profErr;
         }
@@ -57,14 +54,8 @@ export default function Nav() {
         // infer possession of each role from activity
         const [{ count: coupleCnt, error: cErr }, { count: wedCnt, error: wErr }] =
           await Promise.all([
-            sb
-              .from("service_requests")
-              .select("id", { count: "exact", head: true })
-              .eq("couple_id", u.id),
-            sb
-              .from("applications")
-              .select("id", { count: "exact", head: true })
-              .eq("wedflexer_id", u.id),
+            sb.from("service_requests").select("id", { count: "exact", head: true }).eq("couple_id", u.id),
+            sb.from("applications").select("id", { count: "exact", head: true }).eq("wedflexer_id", u.id),
           ]);
 
         if (cErr) throw cErr;
@@ -78,22 +69,21 @@ export default function Nav() {
         setLoading(false);
       }
     })();
-  }, [pathname]);
+  }, [pathname]); // rerun when route changes, so Nav stays in sync
 
   async function switchRole(next: "couple" | "wedflexer") {
     try {
       const sb = supabaseBrowser();
 
-      // auth status
+      // Are they signed in at all?
       const { data: userData } = await sb.auth.getUser();
       if (!userData?.user) {
-        // not signed in → send to the correct funnel
-        window.location.href =
-          next === "couple" ? "/post-your-first-offer" : "/earn-money";
+        // not signed in → send to onboarding funnel
+        window.location.href = next === "couple" ? "/post-your-first-offer" : "/earn-money";
         return;
       }
 
-      // if they don't "have" that role yet, go to onboarding for it
+      // If they don't have that role yet, go to that funnel instead of just toggling
       if (next === "couple" && !hasCouple) {
         window.location.href = "/post-your-first-offer";
         return;
@@ -103,7 +93,6 @@ export default function Nav() {
         return;
       }
 
-      // persist active_role with a valid bearer under RLS
       const { data: sess } = await sb.auth.getSession();
       const token = sess.session?.access_token;
 
@@ -117,32 +106,22 @@ export default function Nav() {
       });
 
       const json = await res.json();
-      if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || `HTTP ${res.status}`);
-      }
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `HTTP ${res.status}`);
 
       setRole(next);
-      // refresh so pages like /r/[id] re-evaluate role and show the proper UI
+      // reload so pages like /r/[id] + the Nav pick up the new role
       window.location.reload();
     } catch {
-      // fallback → funnel for that role
-      window.location.href =
-        next === "couple" ? "/post-your-first-offer" : "/earn-money";
+      // fallback → funnel
+      window.location.href = next === "couple" ? "/post-your-first-offer" : "/earn-money";
     }
   }
 
-  async function handleSignOut() {
+  async function signOut() {
     try {
       const sb = supabaseBrowser();
       await sb.auth.signOut();
-    } catch (e) {
-      console.error("Sign out failed:", e);
     } finally {
-      // clear local state + hard redirect to nuke any cached auth UI
-      setEmail(null);
-      setRole(null);
-      setHasCouple(false);
-      setHasWedflexer(false);
       window.location.href = "/";
     }
   }
@@ -150,192 +129,15 @@ export default function Nav() {
   const isSignedIn = !!email;
   const bothRoles = hasCouple && hasWedflexer;
 
-  function GuestLinks() {
-    return (
-      <>
-        <Link
-          href="/"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/" && "font-semibold text-purple-700",
-          )}
-        >
-          Home
-        </Link>
-        <Link
-          href="/mission"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/mission" && "font-semibold text-purple-700",
-          )}
-        >
-          Mission
-        </Link>
-        <Link
-          href="/post-your-first-offer"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/post-your-first-offer" &&
-              "font-semibold text-purple-700",
-          )}
-        >
-          Post your first offer
-        </Link>
-        <Link
-          href="/earn-money"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/earn-money" && "font-semibold text-purple-700",
-          )}
-        >
-          Earn money
-        </Link>
-      </>
-    );
-  }
-
-  function CoupleLinksOnly() {
-    return (
-      <>
-        <Link
-          href="/"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/" && "font-semibold text-purple-700",
-          )}
-        >
-          Home
-        </Link>
-        <Link
-          href="/mission"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/mission" && "font-semibold text-purple-700",
-          )}
-        >
-          Mission
-        </Link>
-        <Link
-          href="/post-offer"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/post-offer" && "font-semibold text-purple-700",
-          )}
-        >
-          Post Offer
-        </Link>
-        <button
-          onClick={() => switchRole("couple")}
-          className={cx(
-            "hover:text-purple-700",
-            pathname?.startsWith("/dashboard/couple") &&
-              "font-semibold text-purple-700",
-          )}
-        >
-          Dashboard
-        </button>
-      </>
-    );
-  }
-
-  function WedflexerLinksOnly() {
-    return (
-      <>
-        <Link
-          href="/"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/" && "font-semibold text-purple-700",
-          )}
-        >
-          Home
-        </Link>
-        <Link
-          href="/mission"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/mission" && "font-semibold text-purple-700",
-          )}
-        >
-          Mission
-        </Link>
-        <Link
-          href="/feed"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/feed" && "font-semibold text-purple-700",
-          )}
-        >
-          Browse Offers
-        </Link>
-        <button
-          onClick={() => switchRole("wedflexer")}
-          className={cx(
-            "hover:text-purple-700",
-            pathname?.startsWith("/dashboard/wedflexer") &&
-              "font-semibold text-purple-700",
-          )}
-        >
-          Dashboard
-        </button>
-      </>
-    );
-  }
-
-  function BothLinks() {
-    return (
-      <>
-        <Link
-          href="/"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/" && "font-semibold text-purple-700",
-          )}
-        >
-          Home
-        </Link>
-        <Link
-          href="/mission"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/mission" && "font-semibold text-purple-700",
-          )}
-        >
-          Mission
-        </Link>
-        <Link
-          href="/feed"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/feed" && "font-semibold text-purple-700",
-          )}
-        >
-          Browse Offers
-        </Link>
-        <Link
-          href="/post-offer"
-          className={cx(
-            "hover:text-purple-700",
-            pathname === "/post-offer" && "font-semibold text-purple-700",
-          )}
-        >
-          Post Offer
-        </Link>
-        <button
-          onClick={() =>
-            switchRole(role === "wedflexer" ? "wedflexer" : "couple")
-          }
-          className={cx(
-            "hover:text-purple-700",
-            pathname?.startsWith("/dashboard") &&
-              "font-semibold text-purple-700",
-          )}
-        >
-          Dashboard
-        </button>
-      </>
-    );
-  }
+  // Dashboard link target, based on role & what they have
+  const dashboardHref =
+    role === "wedflexer"
+      ? "/dashboard/wedflexer"
+      : role === "couple"
+      ? "/dashboard/couple"
+      : hasWedflexer
+      ? "/dashboard/wedflexer"
+      : "/dashboard/couple";
 
   return (
     <nav className="flex flex-col md:flex-row md:items-center md:justify-between text-slate-800 gap-3 md:gap-0">
@@ -348,20 +150,107 @@ export default function Nav() {
 
       {/* Center links */}
       <div className="flex flex-wrap gap-4 text-sm">
-        {loading
-          ? null
-          : !isSignedIn
-          ? <GuestLinks />
-          : bothRoles
-          ? <BothLinks />
-          : hasCouple
-          ? <CoupleLinksOnly />
-          : hasWedflexer
-          ? <WedflexerLinksOnly />
-          : <GuestLinks />}
+        {!isSignedIn ? (
+          <>
+            <Link
+              href="/"
+              className={cx(
+                "hover:text-purple-700",
+                pathname === "/" && "font-semibold text-purple-700",
+              )}
+            >
+              Home
+            </Link>
+            <Link
+              href="/mission"
+              className={cx(
+                "hover:text-purple-700",
+                pathname === "/mission" && "font-semibold text-purple-700",
+              )}
+            >
+              Mission
+            </Link>
+            <Link
+              href="/post-your-first-offer"
+              className={cx(
+                "hover:text-purple-700",
+                pathname === "/post-your-first-offer" && "font-semibold text-purple-700",
+              )}
+            >
+              Post your first offer
+            </Link>
+            <Link
+              href="/earn-money"
+              className={cx(
+                "hover:text-purple-700",
+                pathname === "/earn-money" && "font-semibold text-purple-700",
+              )}
+            >
+              Earn money
+            </Link>
+          </>
+        ) : (
+          <>
+            <Link
+              href="/"
+              className={cx(
+                "hover:text-purple-700",
+                pathname === "/" && "font-semibold text-purple-700",
+              )}
+            >
+              Home
+            </Link>
+            <Link
+              href="/mission"
+              className={cx(
+                "hover:text-purple-700",
+                pathname === "/mission" && "font-semibold text-purple-700",
+              )}
+            >
+              Mission
+            </Link>
+
+            {/* Wedflexer-only link */}
+            {hasWedflexer && (
+              <Link
+                href="/feed"
+                className={cx(
+                  "hover:text-purple-700",
+                  pathname === "/feed" && "font-semibold text-purple-700",
+                )}
+              >
+                Browse offers
+              </Link>
+            )}
+
+            {/* Couple-only link */}
+            {hasCouple && (
+              <Link
+                href="/post-offer"
+                className={cx(
+                  "hover:text-purple-700",
+                  pathname === "/post-offer" && "font-semibold text-purple-700",
+                )}
+              >
+                Post offer
+              </Link>
+            )}
+
+            {/* Dashboard always visible once signed in */}
+            <Link
+              href={dashboardHref}
+              className={cx(
+                "hover:text-purple-700",
+                pathname?.startsWith("/dashboard") && "font-semibold text-purple-700",
+              )}
+            >
+              Dashboard
+            </Link>
+          </>
+        )}
       </div>
 
-      {/* Right side: auth + role toggle + sign out */}
+      {/* Right side: auth + role toggle */}
       <div className="flex items-center gap-3">
         {!isSignedIn && !loading && (
           <Link
@@ -372,90 +261,82 @@ export default function Nav() {
           </Link>
         )}
 
-        {!!isSignedIn && (
-          <div className="flex items-center gap-3">
-            {/* User + role toggle */}
-            <div className="flex items-center gap-2">
-              <span
-                className="text-sm text-slate-700 truncate max-w-[180px]"
-                title={email || ""}
-              >
-                {email}
-              </span>
+        {isSignedIn && (
+          <div className="flex items-center gap-2">
+            {/* Email */}
+            <span className="text-sm text-slate-700 truncate max-w-[180px]" title={email || ""}>
+              {email}
+            </span>
 
-              {bothRoles ? (
-                <div className="bg-slate-100 border rounded-full flex text-xs">
-                  <button
-                    onClick={() => switchRole("couple")}
-                    className={
-                      "px-3 py-1 rounded-full " +
-                      (role === "couple"
-                        ? "bg-purple-700 text-white"
-                        : "text-slate-700 hover:text-purple-700")
-                    }
-                    disabled={loading}
-                  >
-                    Couple
-                  </button>
-                  <button
-                    onClick={() => switchRole("wedflexer")}
-                    className={
-                      "px-3 py-1 rounded-full " +
-                      (role === "wedflexer"
-                        ? "bg-purple-700 text-white"
-                        : "text-slate-700 hover:text-purple-700")
-                    }
-                    disabled={loading}
-                  >
-                    WedFlexer
-                  </button>
-                </div>
-              ) : hasCouple && !hasWedflexer ? (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="px-2 py-1 rounded-full border bg-white">
-                    Couple
-                  </span>
-                  <button
-                    onClick={() => switchRole("wedflexer")}
-                    className="text-purple-700 hover:underline"
-                  >
-                    Become a WedFlexer
-                  </button>
-                </div>
-              ) : hasWedflexer && !hasCouple ? (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="px-2 py-1 rounded-full border bg-white">
-                    WedFlexer
-                  </span>
-                  <button
-                    onClick={() => switchRole("couple")}
-                    className="text-purple-700 hover:underline"
-                  >
-                    Set up Couple
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-xs">
-                  <button
-                    onClick={() => switchRole("couple")}
-                    className="px-2 py-1 rounded-full border bg-white hover:text-purple-700"
-                  >
-                    I am planning a wedding
-                  </button>
-                  <button
-                    onClick={() => switchRole("wedflexer")}
-                    className="px-2 py-1 rounded-full border bg-white hover:text-purple-700"
-                  >
-                    I am a WedFlexer
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* Role toggle */}
+            {bothRoles ? (
+              <div className="bg-slate-100 border rounded-full flex text-xs">
+                <button
+                  onClick={() => switchRole("couple")}
+                  className={
+                    "px-3 py-1 rounded-full " +
+                    (role === "couple"
+                      ? "bg-purple-700 text-white"
+                      : "text-slate-700 hover:text-purple-700")
+                  }
+                  disabled={loading}
+                >
+                  Couple
+                </button>
+                <button
+                  onClick={() => switchRole("wedflexer")}
+                  className={
+                    "px-3 py-1 rounded-full " +
+                    (role === "wedflexer"
+                      ? "bg-purple-700 text-white"
+                      : "text-slate-700 hover:text-purple-700")
+                  }
+                  disabled={loading}
+                >
+                  WedFlexer
+                </button>
+              </div>
+            ) : hasCouple && !hasWedflexer ? (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="px-2 py-1 rounded-full border bg-white">Couple</span>
+                <button
+                  onClick={() => switchRole("wedflexer")}
+                  className="text-purple-700 hover:underline"
+                >
+                  Become a WedFlexer
+                </button>
+              </div>
+            ) : hasWedflexer && !hasCouple ? (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="px-2 py-1 rounded-full border bg-white">WedFlexer</span>
+                <button
+                  onClick={() => switchRole("couple")}
+                  className="text-purple-700 hover:underline"
+                >
+                  Set up Couple
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs">
+                <button
+                  onClick={() => switchRole("couple")}
+                  className="px-2 py-1 rounded-full border bg-white hover:text-purple-700"
+                >
+                  I am planning a wedding
+                </button>
+                <button
+                  onClick={() => switchRole("wedflexer")}
+                  className="px-2 py-1 rounded-full border bg-white hover:text-purple-700"
+                >
+                  I am a WedFlexer
+                </button>
+              </div>
+            )}
 
             {/* Sign out button */}
             <button
-              onClick={handleSignOut}
-              className="text-xs text-slate-500 hover:text-red-600 border rounded px-2 py-1"
+              onClick={signOut}
+              className="ml-2 text-xs px-3 py-1 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50"
             >
               Sign out
             </button>
@@ -463,7 +344,7 @@ export default function Nav() {
         )}
       </div>
 
-      {/* Debug helper (optional)
+      {/* Optional debug  
       {loadErr && (
         <div className="text-[10px] text-red-600 max-w-xs break-words">
           Nav error: {loadErr}
