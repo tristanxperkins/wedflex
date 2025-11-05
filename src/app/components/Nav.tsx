@@ -1,8 +1,7 @@
 "use client";
 
-import React, { JSX } from "react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { JSX, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabaseBrowser } from "../supabase/client";
 
