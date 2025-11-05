@@ -14,7 +14,11 @@ function toErr(x: unknown): string {
   if (!x) return "Unknown error";
   if (typeof x === "string") return x;
   if (x instanceof Error) return x.message;
-  try { return JSON.stringify(x); } catch { return String(x); }
+  try {
+    return JSON.stringify(x);
+  } catch {
+    return String(x);
+  }
 }
 
 /** DB shapes used on this page */
@@ -62,8 +66,10 @@ export default function RequestDetailPage() {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-const [bookingForApp, setBookingForApp] = useState<string | null>(null);
-const [bookingErr, setBookingErr] = useState<string | null>(null);
+
+  // booking/checkout state
+  const [bookingErr, setBookingErr] = useState<string | null>(null);
+  const [bookingLoading, setBookingLoading] = useState<string | null>(null);
 
   // Apply form
   const [applyMsg, setApplyMsg] = useState("");
@@ -73,15 +79,15 @@ const [bookingErr, setBookingErr] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<string[]>([]);
-const [uploading, setUploading] = useState(false);
-const [uploadErr, setUploadErr] = useState<string | null>(null);
-
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
 
   const offerAmount = useMemo(
-    () => (reqRow?.offer_cents != null
-      ? `$${Math.round(reqRow.offer_cents / 100).toLocaleString()}`
-      : undefined),
-    [reqRow]
+    () =>
+      reqRow?.offer_cents != null
+        ? `$${Math.round(reqRow.offer_cents / 100).toLocaleString()}`
+        : undefined,
+    [reqRow],
   );
 
   useEffect(() => {
@@ -126,7 +132,9 @@ const [uploadErr, setUploadErr] = useState<string | null>(null);
         // couple snippet
         const { data: cp, error: cErr } = await sb
           .from("profiles")
-          .select("id, avatar_url, couple_display_name, our_story, wedding_style, wedding_date, inspiration_urls")
+          .select(
+            "id, avatar_url, couple_display_name, our_story, wedding_style, wedding_date, inspiration_urls",
+          )
           .eq("id", request.couple_id)
           .single();
         if (cErr) throw cErr;
@@ -143,7 +151,9 @@ const [uploadErr, setUploadErr] = useState<string | null>(null);
         if (!cancel) setLoading(false);
       }
     })();
-    return () => { cancel = true; };
+    return () => {
+      cancel = true;
+    };
   }, [id]);
 
   async function submitApplication() {
@@ -181,9 +191,13 @@ const [uploadErr, setUploadErr] = useState<string | null>(null);
 
       let json: unknown = null;
       let raw = "";
-      try { json = await res.json(); } catch { raw = await res.text(); }
-type apiresponse = {ok?:boolean;error?:string;id?:string}
-const parsed = json as apiresponse;
+      try {
+        json = await res.json();
+      } catch {
+        raw = await res.text();
+      }
+      type ApiResponse = { ok?: boolean; error?: string; id?: string };
+      const parsed = json as ApiResponse;
 
       if (!res.ok || !parsed?.ok) {
         throw new Error(parsed?.error ?? (raw || `HTTP ${res.status}`));
@@ -204,44 +218,81 @@ const parsed = json as apiresponse;
     }
   }
 
-  async function handleFilesSelected(files: FileList | null) {
-  if (!files || files.length === 0) return;
-  try {
-    setUploading(true);
-    setUploadErr(null);
+  async function handleFilesSelected(filesList: FileList | null) {
+    if (!filesList || filesList.length === 0) return;
+    try {
+      setUploading(true);
+      setUploadErr(null);
 
-    const sb = supabaseBrowser();
-    const { data: me } = await sb.auth.getUser();
-    if (!me?.user) throw new Error("Not authenticated");
+      const sb = supabaseBrowser();
+      const { data: me } = await sb.auth.getUser();
+      if (!me?.user) throw new Error("Not authenticated");
 
-    const uid = me.user.id;
+      const uid = me.user.id;
 
-    const uploaded: string[] = [];
-    for (const file of Array.from(files)) {
-      // Unique key per user
-      const key = `${uid}/${Date.now()}-${encodeURIComponent(file.name)}`;
-      const up = await sb.storage.from("application_files").upload(key, file, {
-        cacheControl: "3600",
-        upsert: false,
-      });
-      if (up.error) throw up.error;
+      const uploaded: string[] = [];
+      for (const file of Array.from(filesList)) {
+        const key = `${uid}/${Date.now()}-${encodeURIComponent(file.name)}`;
+        const up = await sb.storage
+          .from("application_files")
+          .upload(key, file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
+        if (up.error) throw up.error;
 
-      const pub = sb.storage.from("application_files").getPublicUrl(key);
-      if (!pub?.data?.publicUrl) throw new Error("Could not get public URL");
-      uploaded.push(pub.data.publicUrl);
+        const pub = sb.storage
+          .from("application_files")
+          .getPublicUrl(key);
+        if (!pub?.data?.publicUrl)
+          throw new Error("Could not get public URL");
+        uploaded.push(pub.data.publicUrl);
+      }
+
+      setAttachments((prev) => [...uploaded, ...prev]);
+    } catch (e) {
+      setUploadErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading(false);
     }
-
-    setAttachments((prev) => [...uploaded, ...prev]);
-  } catch (e) {
-    setUploadErr(e instanceof Error ? e.message : String(e));
-  } finally {
-    setUploading(false);
   }
-}
 
-function removeAttachment(url: string) {
-  setAttachments((prev) => prev.filter((u) => u !== url));
-}
+  function removeAttachment(url: string) {
+    setAttachments((prev) => prev.filter((u) => u !== url));
+  }
+
+  // 💳 Couple clicks “Book this WedFlexer” → Stripe Checkout
+  async function handleBook(applicationId: string) {
+    try {
+      setBookingErr(null);
+      setBookingLoading(applicationId);
+
+      const sb = supabaseBrowser();
+      const { data: sess } = await sb.auth.getSession();
+      const token = sess.session?.access_token;
+
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ application_id: applicationId }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json?.ok || !json.url) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+
+      // send couple to Stripe-hosted Checkout
+      window.location.href = json.url as string;
+    } catch (e) {
+      setBookingErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBookingLoading(null);
+    }
+  }
 
   return (
     <RequireAuth>
@@ -256,14 +307,19 @@ function removeAttachment(url: string) {
               <header className="mb-3">
                 <h1 className="text-2xl font-semibold">{reqRow.title}</h1>
                 <p className="opacity-80 text-sm">
-                  {reqRow.category} • {reqRow.location} {offerAmount ? `• ${offerAmount}` : ""}
+                  {reqRow.category} • {reqRow.location}{" "}
+                  {offerAmount ? `• ${offerAmount}` : ""}
                 </p>
-                <p className="text-xs mt-1 opacity-70">Status: {reqRow.status}</p>
+                <p className="text-xs mt-1 opacity-70">
+                  Status: {reqRow.status}
+                </p>
               </header>
 
               {reqRow.description && (
                 <article className="prose prose-sm max-w-none">
-                  <p className="whitespace-pre-wrap">{reqRow.description}</p>
+                  <p className="whitespace-pre-wrap">
+                    {reqRow.description}
+                  </p>
                 </article>
               )}
 
@@ -283,7 +339,10 @@ function removeAttachment(url: string) {
                       </div>
                       {couple.wedding_date && (
                         <div className="text-xs opacity-70">
-                          Wedding Date: {new Date(couple.wedding_date).toLocaleDateString()}
+                          Wedding Date:{" "}
+                          {new Date(
+                            couple.wedding_date,
+                          ).toLocaleDateString()}
                         </div>
                       )}
                     </div>
@@ -295,34 +354,91 @@ function removeAttachment(url: string) {
                     </p>
                   )}
 
-                  {Array.isArray(couple.inspiration_urls) && couple.inspiration_urls.length > 0 && (
-                    <>
-                      <h3 className="text-sm font-medium mt-4">Inspiration</h3>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-                        {couple.inspiration_urls.map((u) => (
-                          <img key={u} src={u} className="aspect-square object-cover rounded border" />
-                        ))}
-                      </div>
-                    </>
-                  )}
+                  {Array.isArray(couple.inspiration_urls) &&
+                    couple.inspiration_urls.length > 0 && (
+                      <>
+                        <h3 className="text-sm font-medium mt-4">
+                          Inspiration
+                        </h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+                          {couple.inspiration_urls.map((u) => (
+                            <img
+                              key={u}
+                              src={u}
+                              className="aspect-square object-cover rounded border"
+                            />
+                          ))}
+                        </div>
+                      </>
+                    )}
                 </div>
               )}
 
-              {/* If owner, show simple applicants list */}
+              {/* If owner, show applicants list + Book button */}
               {isOwner && apps.length > 0 && (
                 <div className="mt-6 border rounded-lg p-4">
                   <h2 className="font-semibold mb-2">Applications</h2>
                   <ul className="divide-y">
-                    {apps.map((a) => (
-                      <li key={a.id} className="py-3 text-sm">
-                        <div>Application: <span className="font-medium">{a.status ?? "pending"}</span></div>
-                        {typeof a.bid_cents === "number" && (
-                          <div>Bid: ${Math.round(a.bid_cents / 100).toLocaleString()}</div>
-                        )}
-                        {a.message && <div className="opacity-80 mt-1">{a.message}</div>}
-                      </li>
-                    ))}
+                    {apps.map((a) => {
+                      const statusLabel = a.status ?? "pending";
+                      const canBook =
+                        reqRow.status === "open" &&
+                        statusLabel === "pending";
+
+                      return (
+                        <li
+                          key={a.id}
+                          className="py-3 text-sm flex flex-col md:flex-row md:justify-between gap-2"
+                        >
+                          <div>
+                            <div>
+                              Application:{" "}
+                              <span className="font-medium">
+                                {statusLabel}
+                              </span>
+                            </div>
+                            {typeof a.bid_cents === "number" && (
+                              <div>
+                                Bid: $
+                                {Math.round(
+                                  a.bid_cents / 100,
+                                ).toLocaleString()}
+                              </div>
+                            )}
+                            {a.message && (
+                              <div className="opacity-80 mt-1">
+                                {a.message}
+                              </div>
+                            )}
+                          </div>
+
+                          {canBook && (
+                            <div className="flex flex-col items-start md:items-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleBook(a.id)}
+                                disabled={bookingLoading === a.id}
+                                className="bg-purple-700 text-white text-xs px-3 py-2 rounded hover:bg-purple-800 disabled:opacity-60"
+                              >
+                                {bookingLoading === a.id
+                                  ? "Starting checkout…"
+                                  : "Book this WedFlexer"}
+                              </button>
+                              <span className="text-[11px] text-slate-500">
+                                You’ll pay securely via Stripe.
+                              </span>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
+
+                  {bookingErr && (
+                    <p className="mt-2 text-xs text-red-600">
+                      Booking error: {bookingErr}
+                    </p>
+                  )}
                 </div>
               )}
             </>
@@ -335,12 +451,16 @@ function removeAttachment(url: string) {
           {reqRow?.status !== "open" ? (
             <div className="border rounded-lg p-4">
               <h3 className="font-semibold">Applications closed</h3>
-              <p className="text-sm opacity-70 mt-1">This request is not open.</p>
+              <p className="text-sm opacity-70 mt-1">
+                This request is not open.
+              </p>
             </div>
           ) : active !== "wedflexer" ? (
             <div className="border rounded-lg p-4">
               <h3 className="font-semibold mb-1">Apply to this Request</h3>
-              <p className="text-sm opacity-70">You need a WedFlexer account to apply.</p>
+              <p className="text-sm opacity-70">
+                You need a WedFlexer account to apply.
+              </p>
               <button
                 onClick={() => router.push("/earn-money")}
                 className="mt-3 bg-purple-700 text-white rounded px-4 py-2"
@@ -352,10 +472,13 @@ function removeAttachment(url: string) {
             <section className="border rounded-lg p-4">
               <h3 className="font-semibold mb-1">Apply Now</h3>
               <p className="text-sm opacity-80 mb-4">
-                Send a short message and (optionally) attach work samples. You can accept the posted offer or submit a counter.
+                Send a short message and (optionally) attach work samples.
+                You can accept the posted offer or submit a counter.
               </p>
 
-              <label className="block text-sm font-medium mb-1">Your Message *</label>
+              <label className="block text-sm font-medium mb-1">
+                Your Message *
+              </label>
               <textarea
                 className="w-full border rounded p-2 text-sm"
                 value={applyMsg}
@@ -381,15 +504,21 @@ function removeAttachment(url: string) {
                   />
                   <label htmlFor="accept-offer" className="text-sm">
                     {reqRow?.offer_cents != null
-                      ? `I accept the offer of $${Math.round(reqRow.offer_cents / 100).toLocaleString()}`
+                      ? `I accept the offer of $${Math.round(
+                          reqRow.offer_cents / 100,
+                        ).toLocaleString()}`
                       : "Couple did not post an offer amount"}
                   </label>
                 </div>
 
                 <div className="mt-3">
-                  <label className="block text-sm font-medium mb-1">Counter-offer</label>
+                  <label className="block text-sm font-medium mb-1">
+                    Counter-offer
+                  </label>
                   <div className="flex items-center gap-2">
-                    <span className="border rounded px-2 py-2 text-sm select-none">$</span>
+                    <span className="border rounded px-2 py-2 text-sm select-none">
+                      $
+                    </span>
                     <input
                       type="number"
                       min={0}
@@ -397,103 +526,140 @@ function removeAttachment(url: string) {
                       className="w-full border rounded px-3 py-2"
                       placeholder={
                         reqRow?.offer_cents != null
-                          ? Math.round(reqRow.offer_cents / 100).toString()
+                          ? Math.round(
+                              reqRow.offer_cents / 100,
+                            ).toString()
                           : "Enter your bid"
                       }
                       value={counter}
                       onChange={(e) => setCounter(e.target.value)}
-                      disabled={acceptOffer && reqRow?.offer_cents != null}
+                      disabled={
+                        acceptOffer && reqRow?.offer_cents != null
+                      }
                     />
                   </div>
-                  <p className="text-xs opacity-70 mt-1">Leave blank to send only your message.</p>
+                  <p className="text-xs opacity-70 mt-1">
+                    Leave blank to send only your message.
+                  </p>
                 </div>
               </div>
 
-              {/* Attachments */}
+              {/* Existing basic attachment URLs (files) */}
               <div className="mt-4">
-  <label className="text-sm font-medium">Attachments</label>
-  <div className="mt-2 flex items-center gap-2">
-    <input
-      type="file"
-      multiple
-      onChange={async (e) => {
-        if (!e.currentTarget.files?.length) return;
-        try {
-          setPosting(true);
-          const sb = supabaseBrowser();
-          const { data: me } = await sb.auth.getUser();
-          if (!me?.user?.id) throw new Error("Not authenticated");
+                <label className="text-sm font-medium">Attachments</label>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="file"
+                    multiple
+                    onChange={async (e) => {
+                      if (!e.currentTarget.files?.length) return;
+                      try {
+                        setPosting(true);
+                        const sb = supabaseBrowser();
+                        const { data: me } =
+                          await sb.auth.getUser();
+                        if (!me?.user?.id)
+                          throw new Error("Not authenticated");
 
-          const list: string[] = [];
-          for (const file of Array.from(e.currentTarget.files)) {
-            // create a unique path per user
-            const path = `${me.user.id}/${Date.now()}-${file.name}`;
-            const { error: upErr } = await sb.storage
-              .from("applications")
-              .upload(path, file, { upsert: false });
-            if (upErr) throw upErr;
+                        const list: string[] = [];
+                        for (const file of Array.from(
+                          e.currentTarget.files,
+                        )) {
+                          const path = `${me.user.id}/${Date.now()}-${file.name}`;
+                          const { error: upErr } = await sb.storage
+                            .from("applications")
+                            .upload(path, file, {
+                              upsert: false,
+                            });
+                          if (upErr) throw upErr;
 
-            // get a public URL for display / API
-            const { data: pub } = sb.storage.from("applications").getPublicUrl(path);
-            list.push(pub.publicUrl);
-          }
-          setFiles((prev) => [...list, ...prev]);
-        } catch (e) {
-          setErr(e instanceof Error ? e.message : String(e));
-        } finally {
-          setPosting(false);
-          // clear the file input so same files can be selected again if needed
-          e.currentTarget.value = "";
-        }
-      }}
-    />
-  </div>
+                          const { data: pub } = sb.storage
+                            .from("applications")
+                            .getPublicUrl(path);
+                          list.push(pub.publicUrl);
+                        }
+                        setFiles((prev) => [...list, ...prev]);
+                      } catch (e) {
+                        setErr(
+                          e instanceof Error
+                            ? e.message
+                            : String(e),
+                        );
+                      } finally {
+                        setPosting(false);
+                        e.currentTarget.value = "";
+                      }
+                    }}
+                  />
+                </div>
 
-  {files.length > 0 && (
-    <ul className="mt-2 space-y-1 text-xs break-all">
-      {files.map((u) => (
-        <li key={u} className="text-purple-700 underline">{u}</li>
-      ))}
-    </ul>
-  )}
-</div>
-{/* Attachments (optional) */}
-<div className="mt-4">
-  <label className="block text-sm font-medium mb-2">Attachments (optional)</label>
+                {files.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-xs break-all">
+                    {files.map((u) => (
+                      <li
+                        key={u}
+                        className="text-purple-700 underline"
+                      >
+                        {u}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
 
-  <div className="flex items-center gap-2">
-    <label className="inline-flex items-center px-3 py-2 border rounded cursor-pointer text-sm">
-      <input
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => handleFilesSelected(e.target.files)}
-        accept="image/*,application/pdf"
-      />
-      {uploading ? "Uploading…" : "Add files"}
-    </label>
-    {uploadErr && <span className="text-xs text-red-600">{uploadErr}</span>}
-  </div>
+              {/* New nicer attachment list using application_files bucket */}
+              <div className="mt-4">
+                <label className="block text-sm font-medium mb-2">
+                  Attachments (optional)
+                </label>
 
-  {attachments.length > 0 && (
-    <ul className="mt-3 space-y-2 text-sm">
-      {attachments.map((u) => (
-        <li key={u} className="flex items-center justify-between gap-2">
-          <a href={u} target="_blank" rel="noreferrer" className="underline break-all">
-            {u}
-          </a>
-          <button
-            type="button"
-            onClick={() => removeAttachment(u)}
-            className="text-xs text-red-700 hover:underline"
-          >
-            remove
-          </button>
-        </li>
-      ))}
-    </ul>
-  )}
-</div>
+                <div className="flex items-center gap-2">
+                  <label className="inline-flex items-center px-3 py-2 border rounded cursor-pointer text-sm">
+                    <input
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) =>
+                        handleFilesSelected(e.target.files)
+                      }
+                      accept="image/*,application/pdf"
+                    />
+                    {uploading ? "Uploading…" : "Add files"}
+                  </label>
+                  {uploadErr && (
+                    <span className="text-xs text-red-600">
+                      {uploadErr}
+                    </span>
+                  )}
+                </div>
+
+                {attachments.length > 0 && (
+                  <ul className="mt-3 space-y-2 text-sm">
+                    {attachments.map((u) => (
+                      <li
+                        key={u}
+                        className="flex items-center justify-between gap-2"
+                      >
+                        <a
+                          href={u}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline break-all"
+                        >
+                          {u}
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(u)}
+                          className="text-xs text-red-700 hover:underline"
+                        >
+                          remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
 
               <button
                 onClick={submitApplication}
@@ -503,8 +669,12 @@ function removeAttachment(url: string) {
                 {posting ? "Sending…" : "Submit Application"}
               </button>
 
-              {okMsg && <p className="text-green-700 mt-2">{okMsg}</p>}
-              {!okMsg && err && <p className="text-red-600 mt-2">Error: {err}</p>}
+              {okMsg && (
+                <p className="text-green-700 mt-2">{okMsg}</p>
+              )}
+              {!okMsg && err && (
+                <p className="text-red-600 mt-2">Error: {err}</p>
+              )}
             </section>
           )}
         </aside>

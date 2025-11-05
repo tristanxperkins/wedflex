@@ -92,7 +92,7 @@ export default function WedflexerEarningsPage() {
       }
 
       // Redirect to Stripe Express dashboard
-      window.location.href = json.url as string;
+      window.open(json.url as string, "_blank","noopener,noreferrer");
     } catch (e) {
       setStripeErr(e instanceof Error ? e.message : String(e));
     } finally {
