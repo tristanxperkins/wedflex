@@ -1,20 +1,21 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { supabaseBrowser } from "../../supabase/client"; // adjust path if needed
+import { useRouter } from "next/navigation";
+import { supabaseBrowser } from "../../supabase/client"; // adjust if your path differs
 
 export default function AuthCallbackPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   useEffect(() => {
     (async () => {
-      const code = searchParams.get("code");
-      // if you're using PKCE explicitly and have code_verifier in URL:
-      const codeVerifier = searchParams.get("code_verifier");
+      if (typeof window === "undefined") return;
 
-      // ✅ No code? Don't call Supabase at all – just send them to signin.
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+      const next = params.get("next") || "/dashboard/couple";
+
+      // No code? This is an invalid/old callback, send them to sign-in
       if (!code) {
         router.replace("/auth/signin");
         return;
@@ -22,23 +23,25 @@ export default function AuthCallbackPage() {
 
       const supabase = supabaseBrowser();
 
-      // For supabase-js v2, normally you only pass `code`:
-      // https://supabase.com/docs/reference/javascript/auth-exchangecodeforsession
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      try {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          console.error("Supabase exchange error:", error);
+          router.replace(
+            "/auth/signin?error=" +
+              encodeURIComponent(error.message || "Sign-in failed")
+          );
+          return;
+        }
 
-      if (error) {
-        console.error("Supabase exchange error:", error);
-        router.replace(
-          "/auth/signin?error=" + encodeURIComponent(error.message || "Sign-in failed")
-        );
-        return;
+        // Success → go where the funnel wanted, or default dashboard
+        router.replace(next);
+      } catch (e) {
+        console.error("Auth callback error:", e);
+        router.replace("/auth/signin");
       }
-
-      // Optional: read ?next=… for redirects (we used this for couple/wedflexer funnels)
-      const next = searchParams.get("next") || "/dashboard/couple";
-      router.replace(next);
     })();
-  }, [router, searchParams]);
+  }, [router]);
 
   return (
     <main className="min-h-[50vh] flex items-center justify-center">
