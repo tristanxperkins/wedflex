@@ -1,4 +1,5 @@
 import Nav from "./components/Nav";
+import Link from "next/link";
 
 export default function HomePage() {
   return (
@@ -13,23 +14,22 @@ export default function HomePage() {
           with your big day at a price you set.
         </p>
 
-        <div className="flex flex-wrap gap-4 mt-8">
-          <a
-            href="/post-offer"
-            className="bg-purple-700 text-white text-sm font-medium px-5 py-3 rounded-md hover:bg-purple-800"
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href="/post-your-first-offer"
+            className="inline-flex items-center px-4 py-2 rounded-md bg-purple-700 text-white text-sm font-medium hover:bg-purple-800"
           >
-            Post an Offer (Couples)
-          </a>
+            Post your first offer
+          </Link>
 
-          <a
-            href="/feed"
-            className="border border-purple-700 text-purple-700 text-sm font-medium px-5 py-3 rounded-md hover:bg-purple-50"
+          <Link
+            href="/earn-money"
+            className="inline-flex items-center px-4 py-2 rounded-md border border-purple-700 text-purple-700 text-sm font-medium hover:bg-purple-50"
           >
-            Browse Offers (WedFlexers)
-          </a>
+            Earn money as a WedFlexer
+          </Link>
         </div>
-      </section>
-
+</section>
       <section className="grid md:grid-cols-3 gap-8 text-sm">
         <div className="border rounded-lg p-5">
           <h2 className="text-lg font-semibold text-slate-900 mb-2">
